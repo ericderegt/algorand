@@ -2,6 +2,10 @@ syntax = "proto3";
 
 package pb;
 
+
+message Empty{
+}
+
 // Represent a void message indicating success
 message Success {
 }
@@ -11,13 +15,17 @@ message Error {
     string msg = 1;
 }
 
+message Transaction {
+    string v = 1;
+}
+
 // A single Block on a Blockchain
 message Block {
     int64 id = 1;
     string timestamp = 2;
     string prevHash = 3;
     string hash = 4;
-    string message = 5;
+    repeated Transaction tx = 5;
 }
 
 // Input to AppendBlock
@@ -44,4 +52,35 @@ message SIGRet {
 service Algorand {
     rpc AppendBlock(AppendBlockArgs) returns (AppendBlockRet) {}
     rpc SIG(SIGArgs) returns (SIGRet) {}
+}
+
+message Blockchain {
+    repeated Block blocks = 1;
+}
+
+message Result {
+    oneof result {
+        Blockchain bc = 1;
+        Success s = 2;
+    }
+}
+
+enum Op {
+    GET = 0;
+    SEND = 1;
+}
+
+// A type for arguments across all operations
+message Command {
+    Op operation = 1;
+    oneof arg {
+        Empty empty = 2;
+        Transaction tx = 3;
+    }
+}
+
+// Client service to add to blockchain
+service BCStore {
+    rpc Get (Empty) returns (Result) {}
+    rpc Send (Transaction) returns (Result) {}
 }

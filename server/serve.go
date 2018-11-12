@@ -18,7 +18,6 @@ type ServerState struct {
 	privateKey   int64
 	publicKey 	 int64
 	period		 int64
-	blockchain	 []string
 }
 
 type AppendBlockInput struct {
@@ -76,7 +75,7 @@ func connectToPeer(peer string) (pb.AlgorandClient, error) {
 }
 
 // The main service loop.
-func serve(peers *arrayPeers, id string, port int) {
+func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	algorand := Algorand{AppendChan: make(chan AppendBlockInput)}
 	// Start in a Go routine so it doesn't affect us.
 	go RunAlgorandServer(&algorand, port)
@@ -85,8 +84,6 @@ func serve(peers *arrayPeers, id string, port int) {
 		privateKey: 0,
 		publicKey: 0,
 		period: 1,
-		// eventually make this of type *pb.Block
-		blockchain: []string{},
 	}
 
 	peerClients := make(map[string]pb.AlgorandClient)

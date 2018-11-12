@@ -13,7 +13,7 @@ import (
 )
 
 func usage() {
-	fmt.Printf("Usage %s <endpoint>\n", os.Args[0])
+	fmt.Printf("Usage %s <message>\n", os.Args[0])
 	flag.PrintDefaults()
 }
 
@@ -22,7 +22,7 @@ func main() {
 	flag.Usage = usage
 	flag.Parse()
 	// If there is no endpoint fail
-	if flag.NArg() == 0 {
+	if flag.NArg() < 1 {
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -35,33 +35,15 @@ func main() {
 		log.Fatalf("Failed to dial GRPC server %v", err)
 	}
 	log.Printf("Connected")
-	// Create a KvStore client
-	kvc := pb.NewKvStoreClient(conn)
-	// Clear KVC
-	res, err := kvc.Clear(context.Background(), &pb.Empty{})
-	if err != nil {
-		log.Fatalf("Could not clear")
-	}
+
+	// Create Algorand client
+	bcc := pb.NewBlockchainRequestsClient(conn)
 
 	// Put setting hello -> 1
-	putReq := &pb.KeyValue{Key: "hello", Value: "1"}
-	res, err = kvc.Set(context.Background(), putReq)
+	transReq := &pb.Transaction{V: "Eric and Nick are good at blockchain"}
+	res, err := bcc.Send(context.Background(), transReq)
 	if err != nil {
-		log.Fatalf("Put error")
+		log.Fatalf("Send error")
 	}
-	log.Printf("Got response key: \"%v\" value:\"%v\"", res.GetKv().Key, res.GetKv().Value)
-	if res.GetKv().Key != "hello" || res.GetKv().Value != "1" {
-		log.Fatalf("Put returned the wrong response")
-	}
-
-	// Request value for hello
-	req := &pb.Key{Key: "hello"}
-	res, err = kvc.Get(context.Background(), req)
-	if err != nil {
-		log.Fatalf("Request error %v", err)
-	}
-	log.Printf("Got response key: \"%v\" value:\"%v\"", res.GetKv().Key, res.GetKv().Value)
-	if res.GetKv().Key != "hello" || res.GetKv().Value != "1" {
-		log.Fatalf("Get returned the wrong response")
-	}
+	log.Printf("Got response: %#v", res.GetBc())
 }

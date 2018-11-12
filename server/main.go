@@ -11,7 +11,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	// "github.com/nyu-distributed-systems-fa18/algorand/pb"
+	"github.com/nyu-distributed-systems-fa18/algorand/pb"
 )
 
 func main() {
@@ -50,7 +50,11 @@ func main() {
 	// Create a new GRPC server
 	s := grpc.NewServer()
 
-	go serve(&peers, id, algorandPort)
+	bcs := BCStore{C: make(chan InputChannelType), blockchain: []*pb.Block{}}
+
+	go serve(&bcs, &peers, id, algorandPort)
+
+	pb.RegisterBCStoreServer(s, &bcs)
 
 	log.Printf("Going to listen on port %v", clientPort)
 	// Start serving, this will block this function and only return when done.
