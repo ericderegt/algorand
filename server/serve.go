@@ -112,6 +112,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	// Run forever handling inputs from various channels
 	for {
 		select{
+		case op := <-bcs.C:
+			bcs.HandleCommand(op)
 		case ab := <-algorand.AppendChan:
 			// we got an AppendBlock request
 			log.Printf("AppendBlock: %#v", ab)
