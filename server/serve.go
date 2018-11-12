@@ -17,6 +17,8 @@ import (
 type ServerState struct {
 	privateKey   int64
 	publicKey 	 int64
+	period		 int64
+	blockchain	 []string
 }
 
 type AppendBlockInput struct {
@@ -75,11 +77,17 @@ func connectToPeer(peer string) (pb.AlgorandClient, error) {
 
 // The main service loop.
 func serve(peers *arrayPeers, id string, port int) {
-	algorand := Algorand{}
+	algorand := Algorand{AppendChan: make(chan AppendBlockInput)}
 	// Start in a Go routine so it doesn't affect us.
 	go RunAlgorandServer(&algorand, port)
 
-	state := ServerState{privateKey: 0, publicKey: 0}
+	state := ServerState{
+		privateKey: 0,
+		publicKey: 0,
+		period: 1,
+		// eventually make this of type *pb.Block
+		blockchain: []string{},
+	}
 
 	peerClients := make(map[string]pb.AlgorandClient)
 	peerCount := int64(0)
@@ -94,13 +102,26 @@ func serve(peers *arrayPeers, id string, port int) {
 		peerCount++
 		log.Printf("Connected to %v", peer)
 	}
-
 	log.Printf("My ServerState is: %#v", state)
+
+	type AppendResponse struct {
+		ret *pb.AppendBlockRet
+		err error
+		peer string
+	}
+
+	appendResponseChan := make(chan AppendResponse)
 
 	// Run forever handling inputs from various channels
 	for {
-
-
+		select{
+		case ab := <-algorand.AppendChan:
+			// we got an AppendBlock request
+			log.Printf("AppendBlock: %#v", ab)
+		case ar := <-appendResponseChan:
+			// we got a response to our AppendBlock request
+			log.Printf("AppendBlockResponse: %#v", ar)
+		}
 	}
 	log.Printf("Strange to arrive here")
 }
