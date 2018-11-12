@@ -37,7 +37,7 @@ func main() {
 	log.Printf("Connected")
 
 	// Create Algorand client
-	bcc := pb.NewBlockchainRequestsClient(conn)
+	bcc := pb.NewBCStoreClient(conn)
 
 	// Put setting hello -> 1
 	transReq := &pb.Transaction{V: "Eric and Nick are good at blockchain"}
