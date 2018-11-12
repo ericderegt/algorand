@@ -3,8 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
-	"math"
+	// "math"
 	"net"
+	"time"
 
 	context "golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -15,6 +16,27 @@ import (
 // Persistent and volatile state
 type ServerState struct {
 	privateKey   int64
+	publicKey 	 int64
+}
+
+type AppendBlockInput struct {
+	arg	*pb.AppendBlockArgs
+	response chan pb.AppendBlockRet
+}
+
+type Algorand struct {
+	AppendChan chan AppendBlockInput
+}
+
+func (a *Algorand) AppendBlock(ctx context.Context, arg *pb.AppendBlockArgs) (*pb.AppendBlockRet, error) {
+	c := make(chan pb.AppendBlockRet)
+	a.AppendChan <- AppendBlockInput{arg: arg, response: c}
+	result := <-c
+	return &result, nil
+}
+
+func (a *Algorand) SIG(ctx context.Context, arg *pb.SIGArgs) (*pb.SIGRet, error) {
+	return nil, nil
 }
 
 // Launch a GRPC service for this peer.
@@ -51,13 +73,13 @@ func connectToPeer(peer string) (pb.AlgorandClient, error) {
 	return pb.NewAlgorandClient(conn), nil
 }
 
-// The main service loop. All modifications to the KV store are run through here.
-func serve(s *KVStore, peers *arrayPeers, id string, port int) {
+// The main service loop.
+func serve(peers *arrayPeers, id string, port int) {
 	algorand := Algorand{}
 	// Start in a Go routine so it doesn't affect us.
 	go RunAlgorandServer(&algorand, port)
 
-	state := ServerState{privateKey: 0}
+	state := ServerState{privateKey: 0, publicKey: 0}
 
 	peerClients := make(map[string]pb.AlgorandClient)
 	peerCount := int64(0)
@@ -73,6 +95,7 @@ func serve(s *KVStore, peers *arrayPeers, id string, port int) {
 		log.Printf("Connected to %v", peer)
 	}
 
+	log.Printf("My ServerState is: %#v", state)
 
 	// Run forever handling inputs from various channels
 	for {

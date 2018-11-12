@@ -1,0 +1,5 @@
+./server -peer "127.0.0.1:3001" -peer "127.0.0.1:3005" -port 3002 -algorand 3003
+./server -peer "127.0.0.1:3001" -peer "127.0.0.1:3003" -port 3004 -algorand 3005
+./server -peer "127.0.0.1:3003" -peer "127.0.0.1:3005" -port 3000 -algorand 3001
+
+

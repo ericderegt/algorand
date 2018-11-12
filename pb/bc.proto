@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package pb;
+
+// Represent a void message indicating success
+message Success {
+}
+
+// Represents an error.
+message Error {
+    string msg = 1;
+}
+
+// A single Block on a Blockchain
+message Block {
+    int64 id = 1;
+    string timestamp = 2;
+    string prevHash = 3;
+    string hash = 4;
+    string message = 5;
+}
+
+// Input to AppendBlock
+message AppendBlockArgs {
+    // Block block = 1;
+    string v = 1;
+}
+
+message AppendBlockRet {
+    bool success = 1;
+}
+
+message SIGArgs {
+    string v = 1;
+    string type = 2;
+    int64 p = 3;
+}
+
+message SIGRet {
+    bool success = 1;
+}
+
+// Algorand service
+service Algorand {
+    rpc AppendBlock(AppendBlockArgs) returns (AppendBlockRet) {}
+    rpc SIG(SIGArgs) returns (SIGRet) {}
+}

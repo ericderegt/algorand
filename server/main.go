@@ -4,14 +4,14 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	rand "math/rand"
+	// rand "math/rand"
 	"net"
 	"os"
-	"time"
+	// "time"
 
 	"google.golang.org/grpc"
 
-	"github.com/nyu-distributed-systems-fa18/algorand/pb"
+	// "github.com/nyu-distributed-systems-fa18/algorand/pb"
 )
 
 func main() {
@@ -24,7 +24,7 @@ func main() {
 		"Seed for random number generator, values less than 0 result in use of time")
 	flag.IntVar(&clientPort, "port", 3000,
 		"Port on which server should listen to client requests")
-	flag.IntVar(&raft=Port, "algorand", 3001,
+	flag.IntVar(&algorandPort, "algorand", 3001,
 		"Port on which server should listen to Algorand requests")
 	flag.Var(&peers, "peer", "A peer for this process")
 	flag.Parse()
@@ -50,13 +50,8 @@ func main() {
 	// Create a new GRPC server
 	s := grpc.NewServer()
 
-	// Initialize KVStore
-	store := KVStore{C: make(chan InputChannelType), store: make(map[string]string)}
-	go serve(&store, &peers, id, algorandPort)
+	go serve(&peers, id, algorandPort)
 
-	// Tell GRPC that s will be serving requests for the KvStore service and should use store (defined on line 23)
-	// as the struct whose methods should be called in response.
-	pb.RegisterKvStoreServer(s, &store)
 	log.Printf("Going to listen on port %v", clientPort)
 	// Start serving, this will block this function and only return when done.
 	if err := s.Serve(c); err != nil {
