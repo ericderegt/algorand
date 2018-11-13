@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"encoding/json"
 
 	context "golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -45,12 +46,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Send error")
 	}
-	log.Printf("Got response: %#v", res.GetBc())
-
-	// Get the Blockchain
-	res, err = bcc.Get(context.Background(), &pb.Empty{})
+	bytes, err := json.MarshalIndent(res.GetBc(), "", "    ")
 	if err != nil {
-		log.Fatalf("Get error")
+		log.Println(err)
 	}
-	// log.Printf("Got response: %#v", res.GetBc())
+	log.Printf(string(bytes))
 }
