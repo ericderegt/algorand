@@ -114,17 +114,35 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		case op := <-bcs.C:
 			// Received a command from client
 			// Check if add new Transaction, or simply get the curent Blockchain
-			if op.command.Operation == pb.Op_SEND {
-				log.Printf("Received new Transaction to add")
+			if op.command.Operation == pb.Op_GET {
+				log.Printf("Request to view the blockchain")
+				bcs.HandleCommand(op)
 			} else {
-				log.Printf("Request to see the Blockchain")
-			}
-			bcs.HandleCommand(op)
+				log.Printf("Request to add new Block")
 
-			log.Printf("Period: %v, Blockchain: %#v", state.period, bcs.blockchain)
+				// for now, we simply append to our blockchain and broadcast the new blockchain to all known peers
+				bcs.HandleCommand(op)
+				for p, c := range peerClients {
+					go func(c pb.AlgorandClient, blockchain []*pb.Block, p string) {
+						ret, err := c.AppendBlock(context.Background(), &pb.AppendBlockArgs{Blockchain: blockchain, Peer: id})
+						appendResponseChan <- AppendResponse{ret: ret, err: err, peer: p}
+					}(c, bcs.blockchain, p)
+				}
+				log.Printf("Period: %v, Blockchain: %#v", state.period, bcs.blockchain)
+			}
 		case ab := <-algorand.AppendChan:
 			// we got an AppendBlock request
-			log.Printf("AppendBlock: %#v", ab)
+			log.Printf("AppendBlock from %v", ab.arg.Peer)
+
+			// for now, just check if blockchain is longer than ours
+			// if yes, overwrite ours and return true
+			// if no, return false
+			if len(ab.arg.Blockchain) > len(bcs.blockchain) {
+				bcs.blockchain = ab.arg.Blockchain
+				ab.response <- pb.AppendBlockRet{Success: true}
+			} else {
+				ab.response <- pb.AppendBlockRet{Success: false}
+			}
 		case ar := <-appendResponseChan:
 			// we got a response to our AppendBlock request
 			log.Printf("AppendBlockResponse: %#v", ar)

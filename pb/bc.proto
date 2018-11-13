@@ -30,8 +30,8 @@ message Block {
 
 // Input to AppendBlock
 message AppendBlockArgs {
-    // Block block = 1;
-    string v = 1;
+    string peer = 1;
+    repeated Block blockchain = 2;
 }
 
 message AppendBlockRet {
