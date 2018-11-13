@@ -27,10 +27,10 @@ func generateBlock(oldBlock *pb.Block, tx *pb.Transaction) *pb.Block {
 	transactions := []*pb.Transaction{}
 	transactions = append(transactions, tx)
 
-	newBlock.Id = 0 //hook upt to last block id + 1 once we get GenesisBlock
+	newBlock.Id = oldBlock.Id + 1
 	newBlock.Timestamp = t.String()
 	newBlock.Tx = transactions //simple list of Transactions with one Transaction for now until we decide how to aggreate multiple into one block
-	newBlock.PrevHash = "" // set to last block hash
+	newBlock.PrevHash = oldBlock.Hash
 	newBlock.Hash = calculateHash(newBlock) // set to the hash of all the bytes of this block
 
 	return newBlock
