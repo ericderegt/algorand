@@ -7,12 +7,22 @@ import (
 	// rand "math/rand"
 	"net"
 	"os"
-	// "time"
+	"time"
 
 	"google.golang.org/grpc"
 
 	"github.com/nyu-distributed-systems-fa18/algorand/pb"
 )
+
+func createGenesisBlock() *pb.Block {
+	genesisBlock := new(pb.Block)
+	genesisBlock.Id = 0
+	genesisBlock.Timestamp = time.Now().String()
+	genesisBlock.PrevHash = ""
+	genesisBlock.Hash = calculateHash(genesisBlock)
+	genesisBlock.Tx = nil
+	return genesisBlock
+}
 
 func main() {
 	// Argument parsing
@@ -50,12 +60,16 @@ func main() {
 	// Create a new GRPC server
 	s := grpc.NewServer()
 
+	// Create service to handle BlockChain
 	bcs := BCStore{C: make(chan InputChannelType), blockchain: []*pb.Block{}}
 
+	// Init with GenesisBlock
+	bcs.blockchain = append(bcs.blockchain, createGenesisBlock())
+
+	// Sping up algorand server
 	go serve(&bcs, &peers, id, algorandPort)
 
 	pb.RegisterBCStoreServer(s, &bcs)
-
 	log.Printf("Going to listen on port %v", clientPort)
 	// Start serving, this will block this function and only return when done.
 	if err := s.Serve(c); err != nil {

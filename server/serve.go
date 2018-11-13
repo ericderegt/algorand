@@ -99,7 +99,6 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		peerCount++
 		log.Printf("Connected to %v", peer)
 	}
-	log.Printf("My ServerState is: %#v", state)
 
 	type AppendResponse struct {
 		ret *pb.AppendBlockRet
@@ -121,6 +120,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				log.Printf("Request to see the Blockchain")
 			}
 			bcs.HandleCommand(op)
+
+			log.Printf("Period: %v, Blockchain: %#v", state.period, bcs.blockchain)
 		case ab := <-algorand.AppendChan:
 			// we got an AppendBlock request
 			log.Printf("AppendBlock: %#v", ab)

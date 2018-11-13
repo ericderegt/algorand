@@ -52,5 +52,5 @@ func main() {
 	if err != nil {
 		log.Fatalf("Get error")
 	}
-	log.Printf("Got response: %#v", res.GetBc())
+	// log.Printf("Got response: %#v", res.GetBc())
 }
