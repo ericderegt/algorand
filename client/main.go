@@ -39,11 +39,18 @@ func main() {
 	// Create Algorand client
 	bcc := pb.NewBCStoreClient(conn)
 
-	// Put setting hello -> 1
+	// Send Transaction
 	transReq := &pb.Transaction{V: "Eric and Nick are good at blockchain"}
 	res, err := bcc.Send(context.Background(), transReq)
 	if err != nil {
 		log.Fatalf("Send error")
+	}
+	log.Printf("Got response: %#v", res.GetBc())
+
+	// Get the Blockchain
+	res, err = bcc.Get(context.Background(), &pb.Empty{})
+	if err != nil {
+		log.Fatalf("Get error")
 	}
 	log.Printf("Got response: %#v", res.GetBc())
 }

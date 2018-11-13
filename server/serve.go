@@ -113,6 +113,13 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	for {
 		select{
 		case op := <-bcs.C:
+			// Received a command from client
+			// Check if add new Transaction, or simply get the curent Blockchain
+			if op.command.Operation == pb.Op_SEND {
+				log.Printf("Received new Transaction to add")
+			} else {
+				log.Printf("Request to see the Blockchain")
+			}
 			bcs.HandleCommand(op)
 		case ab := <-algorand.AppendChan:
 			// we got an AppendBlock request

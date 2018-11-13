@@ -2,6 +2,10 @@ package main
 
 import (
 	"log"
+	"time"
+	"bytes"
+	"encoding/hex"
+	"crypto/sha256"
 
 	context "golang.org/x/net/context"
 
@@ -17,7 +21,7 @@ type InputChannelType struct {
 // The struct for blockchain stores.
 type BCStore struct {
 	C     chan InputChannelType
-  blockchain []*pb.Block
+  	blockchain []*pb.Block
 }
 
 func (bcs *BCStore) Get(ctx context.Context, in *pb.Empty) (*pb.Result, error) {
@@ -50,8 +54,37 @@ func (bcs *BCStore) GetResponse(arg *pb.Empty) pb.Result {
 	return pb.Result{Result: &pb.Result_Bc{Bc: &pb.Blockchain{Blocks: bcs.blockchain}}}
 }
 
+func calculateHash(block *pb.Block) string {
+	var transactions bytes.Buffer
+	for _,tx := range block.Tx {
+		transactions.WriteString(tx.V)
+	}
+	record := string(block.Id) + block.Timestamp + transactions.String() + block.PrevHash
+	h := sha256.New()
+	h.Write([]byte(record))
+	hashed := h.Sum(nil)
+	return hex.EncodeToString(hashed)
+}
+
+func generateBlock(oldBlock *pb.Block, tx *pb.Transaction) *pb.Block {
+	newBlock := new(pb.Block)
+	t := time.Now()
+	transactions := []*pb.Transaction{}
+	transactions = append(transactions, tx)
+
+	newBlock.Id = 0 //hook upt to last block id + 1 once we get GenesisBlock
+	newBlock.Timestamp = t.String()
+	newBlock.Tx = transactions //simple list of Transactions with one Transaction for now until we decide how to aggreate multiple into one block
+	newBlock.PrevHash = "" // set to last block hash
+	newBlock.Hash = calculateHash(newBlock) // set to the hash of all the bytes of this block
+
+	return newBlock
+}
+
 func (bcs *BCStore) SendResponse(arg *pb.Transaction) pb.Result {
-  return pb.Result{Result: &pb.Result_Bc{Bc: &pb.Blockchain{Blocks: bcs.blockchain}}}
+	newBlock := generateBlock(nil, arg)
+	bcs.blockchain = append(bcs.blockchain, newBlock)
+  	return pb.Result{Result: &pb.Result_Bc{Bc: &pb.Blockchain{Blocks: bcs.blockchain}}}
 }
 
 func (bcs *BCStore) HandleCommand(op InputChannelType) {
