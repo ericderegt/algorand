@@ -18,6 +18,7 @@ type ServerState struct {
 	privateKey   int64
 	publicKey 	 int64
 	period		 int64
+	tempBlock	 pb.Block
 }
 
 type AppendBlockInput struct {
@@ -25,13 +26,26 @@ type AppendBlockInput struct {
 	response chan pb.AppendBlockRet
 }
 
+type AppendTransactionInput struct {
+	arg *pb.AppendTransactionArgs
+	response chan pb.AppendTransactionRet
+}
+
 type Algorand struct {
-	AppendChan chan AppendBlockInput
+	AppendBlockChan chan AppendBlockInput
+	AppendTransactionChan chan AppendTransactionInput
 }
 
 func (a *Algorand) AppendBlock(ctx context.Context, arg *pb.AppendBlockArgs) (*pb.AppendBlockRet, error) {
 	c := make(chan pb.AppendBlockRet)
-	a.AppendChan <- AppendBlockInput{arg: arg, response: c}
+	a.AppendBlockChan <- AppendBlockInput{arg: arg, response: c}
+	result := <-c
+	return &result, nil
+}
+
+func (a *Algorand) AppendTransaction(ctx context.Context, arg *pb.AppendTransactionArgs) (*pb.AppendTransactionRet, error) {
+	c := make(chan pb.AppendTransactionRet)
+	a.AppendTransactionChan <- AppendTransactionInput{arg: arg, response: c}
 	result := <-c
 	return &result, nil
 }
@@ -76,7 +90,10 @@ func connectToPeer(peer string) (pb.AlgorandClient, error) {
 
 // The main service loop.
 func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
-	algorand := Algorand{AppendChan: make(chan AppendBlockInput)}
+	algorand := Algorand{
+		AppendBlockChan: make(chan AppendBlockInput),
+		AppendTransactionChan: make(chan AppendTransactionInput),
+	}
 	// Start in a Go routine so it doesn't affect us.
 	go RunAlgorandServer(&algorand, port)
 
@@ -100,13 +117,20 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		log.Printf("Connected to %v", peer)
 	}
 
-	type AppendResponse struct {
+	type AppendBlockResponse struct {
 		ret *pb.AppendBlockRet
 		err error
 		peer string
 	}
 
-	appendResponseChan := make(chan AppendResponse)
+	type AppendTransactionResponse struct {
+		ret *pb.AppendTransactionRet
+		err error
+		peer string
+	}
+
+	appendBlockResponseChan := make(chan AppendBlockResponse)
+	appendTransactionResponseChan := make(chan AppendTransactionResponse)
 
 	// Run forever handling inputs from various channels
 	for {
@@ -114,25 +138,34 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		case op := <-bcs.C:
 			// Received a command from client
 			// TODO: Add Transaction to our local block, broadcast to every user
+			log.Printf("Transaction request: %#v, Period: %v", op.command.Arg, state.period)
+
+			if op.command.Operation == pb.Op_SEND {
+				state.tempBlock.Tx = append(state.tempBlock.Tx, op.command.GetTx())
+
+				// TODO - broadcast, and figure out when to reponse to client?
+			} else {
+				bcs.HandleCommand(op)
+			}
 
 			// Check if add new Transaction, or simply get the curent Blockchain
-			if op.command.Operation == pb.Op_GET {
-				log.Printf("Request to view the blockchain")
-				bcs.HandleCommand(op)
-			} else {
-				log.Printf("Request to add new Block")
+			// if op.command.Operation == pb.Op_GET {
+			// 	log.Printf("Request to view the blockchain")
+			// 	bcs.HandleCommand(op)
+			// } else {
+			// 	log.Printf("Request to add new Block")
 
-				// for now, we simply append to our blockchain and broadcast the new blockchain to all known peers
-				bcs.HandleCommand(op)
-				for p, c := range peerClients {
-					go func(c pb.AlgorandClient, blockchain []*pb.Block, p string) {
-						ret, err := c.AppendBlock(context.Background(), &pb.AppendBlockArgs{Blockchain: blockchain, Peer: id})
-						appendResponseChan <- AppendResponse{ret: ret, err: err, peer: p}
-					}(c, bcs.blockchain, p)
-				}
-				log.Printf("Period: %v, Blockchain: %#v", state.period, bcs.blockchain)
-			}
-		case ab := <-algorand.AppendChan:
+			// 	// for now, we simply append to our blockchain and broadcast the new blockchain to all known peers
+			// 	bcs.HandleCommand(op)
+			// 	for p, c := range peerClients {
+			// 		go func(c pb.AlgorandClient, blockchain []*pb.Block, p string) {
+			// 			ret, err := c.AppendBlock(context.Background(), &pb.AppendBlockArgs{Blockchain: blockchain, Peer: id})
+			// 			appendBlockResponseChan <- AppendResponse{ret: ret, err: err, peer: p}
+			// 		}(c, bcs.blockchain, p)
+			// 	}
+			// 	log.Printf("Period: %v, Blockchain: %#v", state.period, bcs.blockchain)
+			// }
+		case ab := <-algorand.AppendBlockChan:
 			// we got an AppendBlock request
 			log.Printf("AppendBlock from %v", ab.arg.Peer)
 
@@ -145,9 +178,18 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			} else {
 				ab.response <- pb.AppendBlockRet{Success: false}
 			}
-		case ar := <-appendResponseChan:
+		case abr := <-appendBlockResponseChan:
 			// we got a response to our AppendBlock request
-			log.Printf("AppendBlockResponse: %#v", ar)
+			log.Printf("AppendBlockResponse: %#v", abr)
+
+		case at := <-algorand.AppendTransactionChan:
+			// we got an AppeendTransaciton request
+			log.Printf("AppendTransaction from %v", at.arg.Peer)
+
+		case atr := <- appendTransactionResponseChan:
+			// we got a response to our AppendTransaction request
+			log.Printf("AppendTransactionResponse: %#v", atr)
+
 		}
 	}
 	log.Printf("Strange to arrive here")
