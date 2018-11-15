@@ -38,6 +38,15 @@ message AppendBlockRet {
     bool success = 1;
 }
 
+message AppendTransactionArgs {
+    string peer = 1;
+    Transaction tx = 2;
+}
+
+message AppendTransactionRet {
+    bool success = 1;
+}
+
 message SIGArgs {
     string v = 1;
     string type = 2;
@@ -51,6 +60,7 @@ message SIGRet {
 // Algorand service
 service Algorand {
     rpc AppendBlock(AppendBlockArgs) returns (AppendBlockRet) {}
+    rpc AppendTransaction(AppendTransactionArgs) returns (AppendTransactionRet) {}
     rpc SIG(SIGArgs) returns (SIGRet) {}
 }
 

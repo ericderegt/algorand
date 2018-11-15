@@ -113,6 +113,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		select{
 		case op := <-bcs.C:
 			// Received a command from client
+			// TODO: Add Transaction to our local block, broadcast to every user
+
 			// Check if add new Transaction, or simply get the curent Blockchain
 			if op.command.Operation == pb.Op_GET {
 				log.Printf("Request to view the blockchain")
