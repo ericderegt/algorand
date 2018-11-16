@@ -144,6 +144,18 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				state.tempBlock.Tx = append(state.tempBlock.Tx, op.command.GetTx())
 
 				// TODO - broadcast, and figure out when to reponse to client?
+
+				// broadcast
+				for p, c := range peerClients {
+					transaction := op.command.GetTx()
+
+					go func(c pb.AlgorandClient, p string, transaction *pb.Transaction) {
+						log.Printf("Sent transaction to peer %v", p)
+						ret, err := c.AppendTransaction(context.Background(), &pb.AppendTransactionArgs{Peer: p, Tx: transaction})
+						appendTransactionResponseChan <- AppendTransactionResponse{ret: ret, err: err, peer: p}
+					}(c, p, transaction)
+				}
+
 			} else {
 				bcs.HandleCommand(op)
 			}
@@ -183,8 +195,13 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			log.Printf("AppendBlockResponse: %#v", abr)
 
 		case at := <-algorand.AppendTransactionChan:
-			// we got an AppeendTransaciton request
+			// we got an AppendTransaction request
 			log.Printf("AppendTransaction from %v", at.arg.Peer)
+
+			state.tempBlock.Tx = append(state.tempBlock.Tx, at.arg.Tx)
+			log.Printf("Temp block: %#v", len(state.tempBlock.Tx))
+
+			at.response <- pb.AppendTransactionRet{Success: true}
 
 		case atr := <- appendTransactionResponseChan:
 			// we got a response to our AppendTransaction request
