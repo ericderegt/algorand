@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"log"
-	// "math"
 	"net"
 	"time"
 
@@ -17,7 +16,8 @@ import (
 type ServerState struct {
 	privateKey   int64
 	publicKey 	 int64
-	period		 int64
+	round		 int64
+	lastCompletedRound int64
 	tempBlock	 pb.Block
 }
 
@@ -88,6 +88,18 @@ func connectToPeer(peer string) (pb.AlgorandClient, error) {
 	return pb.NewAlgorandClient(conn), nil
 }
 
+func restartTimer(timer *time.Timer) {
+	stopped := timer.Stop()
+
+	if !stopped {
+		for len(timer.C) > 0 {
+			<-timer.C
+		}
+
+	}
+	timer.Reset(5000 * time.Millisecond)
+}
+
 // The main service loop.
 func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	algorand := Algorand{
@@ -100,7 +112,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	state := ServerState{
 		privateKey: 0,
 		publicKey: 0,
-		period: 1,
+		round: 0,
+		lastCompletedRound: 0,
 	}
 
 	peerClients := make(map[string]pb.AlgorandClient)
@@ -132,13 +145,19 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	appendBlockResponseChan := make(chan AppendBlockResponse)
 	appendTransactionResponseChan := make(chan AppendTransactionResponse)
 
+	// Set timer to check for new rounds
+	timer := time.NewTimer(5000 * time.Millisecond)
+
 	// Run forever handling inputs from various channels
 	for {
 		select{
+		case <-timer.C:
+			log.Printf("Timer went off")
+			restartTimer(timer)
 		case op := <-bcs.C:
 			// Received a command from client
 			// TODO: Add Transaction to our local block, broadcast to every user
-			log.Printf("Transaction request: %#v, Period: %v", op.command.Arg, state.period)
+			log.Printf("Transaction request: %#v, Round: %v", op.command.Arg, state.round)
 
 			if op.command.Operation == pb.Op_SEND {
 				state.tempBlock.Tx = append(state.tempBlock.Tx, op.command.GetTx())

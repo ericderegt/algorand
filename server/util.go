@@ -1,17 +1,17 @@
 package main
 
 import (
-	"time"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"time"
 
 	"github.com/nyu-distributed-systems-fa18/algorand/pb"
 )
 
 func calculateHash(block *pb.Block) string {
 	var transactions bytes.Buffer
-	for _,tx := range block.Tx {
+	for _, tx := range block.Tx {
 		transactions.WriteString(tx.V)
 	}
 	record := string(block.Id) + block.Timestamp + transactions.String() + block.PrevHash

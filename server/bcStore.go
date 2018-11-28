@@ -16,8 +16,8 @@ type InputChannelType struct {
 
 // The struct for blockchain stores.
 type BCStore struct {
-	C     chan InputChannelType
-  	blockchain []*pb.Block
+	C          chan InputChannelType
+	blockchain []*pb.Block
 }
 
 func (bcs *BCStore) Get(ctx context.Context, in *pb.Empty) (*pb.Result, error) {
@@ -53,7 +53,7 @@ func (bcs *BCStore) GetResponse(arg *pb.Empty) pb.Result {
 func (bcs *BCStore) SendResponse(arg *pb.Transaction) pb.Result {
 	newBlock := generateBlock(bcs.blockchain[len(bcs.blockchain)-1], arg)
 	bcs.blockchain = append(bcs.blockchain, newBlock)
-  	return pb.Result{Result: &pb.Result_Bc{Bc: &pb.Blockchain{Blocks: bcs.blockchain}}}
+	return pb.Result{Result: &pb.Result_Bc{Bc: &pb.Blockchain{Blocks: bcs.blockchain}}}
 }
 
 func (bcs *BCStore) HandleCommand(op InputChannelType) {
