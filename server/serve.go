@@ -100,6 +100,30 @@ func restartTimer(timer *time.Timer) {
 	timer.Reset(5000 * time.Millisecond)
 }
 
+func sortition(privateKey int64, seed int, role string) (string, string, int) {
+	return "hash", "proof", 1
+}
+
+func runAgreement(state *ServerState, round int64, seed int, tempBlock *pb.Block) {
+	hash, proof, votes := sortition(state.privateKey, seed, "proposer")
+	period := 1
+
+	log.Printf("hash - %v, proof - %v, votes - %v, period - %v", hash, proof, votes, period)
+
+	for votes > 1 {
+		// propose values
+		// go func to all peers
+
+		// if period == 1 || (period > 1 && emptyNextVote) {
+		// 	// propose own value
+		// }
+
+		votes--
+	}
+
+
+}
+
 // The main service loop.
 func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	algorand := Algorand{
@@ -153,6 +177,16 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		select{
 		case <-timer.C:
 			log.Printf("Timer went off")
+
+			if state.lastCompletedRound == state.round {
+				state.round++
+
+				// does this need to be in gorountine
+				tempBlock := state.tempBlock
+				seed := 0
+				runAgreement(&state, state.round, seed, &tempBlock)
+			}
+
 			restartTimer(timer)
 		case op := <-bcs.C:
 			// Received a command from client

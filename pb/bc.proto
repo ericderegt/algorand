@@ -26,6 +26,7 @@ message Block {
     string prevHash = 3;
     string hash = 4;
     repeated Transaction tx = 5;
+    string seed = 6;
 }
 
 // Input to AppendBlock
