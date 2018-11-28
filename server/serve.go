@@ -117,7 +117,9 @@ func restartTimer(timer *time.Timer) {
 
 func sortition(privateKey int64, seed int64, role string) (string, string, int64) {
 	// select half of nodes to propose to start
-	selectedValue := int64(rand.Intn(2))
+	source := rand.NewSource(seed)
+	newRand := rand.New(source)
+	selectedValue := int64(newRand.Intn(2))
 
 	return "hash", "proof", selectedValue
 }
@@ -137,7 +139,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		publicKey: 0,
 		round: 0,
 		lastCompletedRound: 0,
-		seed: 0,
+		seed: int64(port),
 	}
 
 	peerClients := make(map[string]pb.AlgorandClient)
@@ -191,7 +193,10 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
 				proposedBlock := state.tempBlock
 
-				hash, proof, votes := sortition(state.privateKey, state.seed, "proposer")
+				// placeholder until we propose seeds in agreement
+				roundSeed := state.seed + state.round
+
+				hash, proof, votes := sortition(state.privateKey, roundSeed, "proposer")
 
 				// start at period 1
 				period := 1
