@@ -66,7 +66,7 @@ func main() {
 	// Init with GenesisBlock
 	bcs.blockchain = append(bcs.blockchain, createGenesisBlock())
 
-	// Sping up algorand server
+	// Spin up algorand server
 	go serve(&bcs, &peers, id, algorandPort)
 
 	pb.RegisterBCStoreServer(s, &bcs)
