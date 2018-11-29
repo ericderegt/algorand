@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"time"
 	"math/rand"
+	"strings"
 
 	"github.com/nyu-distributed-systems-fa18/algorand/pb"
 )
@@ -18,6 +19,15 @@ func calculateHash(block *pb.Block) string {
 	record := string(block.Id) + block.Timestamp + transactions.String() + block.PrevHash
 	h := sha256.New()
 	h.Write([]byte(record))
+	hashed := h.Sum(nil)
+	return hex.EncodeToString(hashed)
+}
+
+func signMessage(message []string) string {
+	s := strings.Join(message[:],"")
+
+	h := sha256.New()
+	h.Write([]byte(s))
 	hashed := h.Sum(nil)
 	return hex.EncodeToString(hashed)
 }
@@ -49,7 +59,7 @@ func shuffle_selection(arr []string, seed int64, k int64) []string {
 	// create copy of arr that will be suffled
 	shuffled := make([]string, len(arr))
 	copy(shuffled, arr)
-	
+
 	// set up array to return as selected elements
 	// and random number generator
 	selection := make([]string, k)
@@ -68,4 +78,9 @@ func shuffle_selection(arr []string, seed int64, k int64) []string {
 	}
 
 	return selection
+}
+
+func SIG(i string, message []string) *pb.SIGRet {
+	signedMessage := signMessage(message)
+	return &pb.SIGRet{UserId: i, Message: message, SignedMessage: signedMessage}
 }
