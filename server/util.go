@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
@@ -78,6 +79,36 @@ func shuffle_selection(arr []string, seed int64, k int64) []string {
 	}
 
 	return selection
+}
+
+func sortition(privateKey int64, round int64, role string, userId string, userIds []string, k int64) (string, string, int64) {
+	// sortition selects k committee members out of all users
+	committee := shuffle_selection(userIds, round, k)
+
+	// print committee to verify it is the same accross all servers
+	log.Printf("Committee: %#v", committee)
+
+	// Add up how many times we were selected
+	votes := int64(0)
+	for _, member := range committee {
+		if member == userId {
+			votes++
+		}
+	}
+
+	return "hash", "proof", votes
+}
+
+func verify_sort(userId string, userIds []string, round int64, k int64) bool {
+	committee := shuffle_selection(userIds, round, k)
+
+	// loop through committee and verify userId is in there
+	for _, member := range committee {
+		if member == userId {
+			return true
+		}
+	}
+	return false
 }
 
 func SIG(i string, message []string) *pb.SIGRet {

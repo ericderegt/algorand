@@ -119,24 +119,6 @@ func restartTimer(timer *time.Timer) {
 	timer.Reset(5000 * time.Millisecond)
 }
 
-func sortition(privateKey int64, round int64, role string, id string, userIds []string, k int64) (string, string, int64) {
-	// sortition selects k committee members out of all users
-	committee := shuffle_selection(userIds, round, k)
-
-	// print committee to verify it is the same accross all servers
-	log.Printf("Committee: %#v", committee)
-
-	// Add up how many times we were selected
-	votes := int64(0)
-	for _, member := range committee {
-		if member == strings.Split(id, ":")[1] {
-			votes++
-		}
-	}
-
-	return "hash", "proof", votes
-}
-
 // The main service loop.
 func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
@@ -209,6 +191,9 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	// Set timer to check for new rounds
 	timer := time.NewTimer(5000 * time.Millisecond)
 
+	// set hardcode k to be 2 for now, so 2 members will always be selected to committee
+	k := int64(2)
+
 	// Run forever handling inputs from various channels
 	for {
 		select{
@@ -219,7 +204,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				state.round++
 
 				// each server needs exact same seed per round so they all see the same selection
-				_, _, votes := sortition(state.privateKey, state.round, "proposer", id, userIds, int64(2))
+				_, _, votes := sortition(state.privateKey, state.round, "proposer", userId, userIds, k)
 
 				// start at period 1
 				period := 1
@@ -325,8 +310,16 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			log.Printf("AppendTransactionResponse: %#v", atr)
 
 		case pb := <-algorand.ProposeBlockChan:
-			log.Printf("ProposeBlock from %v", pb.arg.Block)
-			// verfiySort
+			proposerId := pb.arg.Credential.UserId
+			log.Printf("ProposeBlock from %v", proposerId)
+
+			verified := verify_sort(proposerId, userIds, state.round, k)
+			if verified {
+				log.Printf("VERIFIED that %v is on the committee for round %v", proposerId, state.round)
+			} else {
+				log.Printf("DENIED that %v is on the committee for round %v", proposerId, state.round)
+			}
+
 		case pbr := <-proposeBlockResponseChan:
 			log.Printf("ProposeBlockResponse: %#v", pbr)
 		}
