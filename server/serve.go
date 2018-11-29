@@ -5,7 +5,9 @@ import (
 	"log"
 	"net"
 	"time"
-	"math/rand"
+	"strings"
+	"sort"
+	// "math/rand"
 
 	context "golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -115,17 +117,27 @@ func restartTimer(timer *time.Timer) {
 	timer.Reset(5000 * time.Millisecond)
 }
 
-func sortition(privateKey int64, seed int64, role string) (string, string, int64) {
-	// select half of nodes to propose to start
-	source := rand.NewSource(seed)
-	newRand := rand.New(source)
-	selectedValue := int64(newRand.Intn(2))
+func sortition(privateKey int64, seed int64, role string, id string, userIds []string, k int64) (string, string, int64) {
+	// sortition selects k committee members out of all users
+	committee := shuffle_selection(userIds, seed, k)
 
-	return "hash", "proof", selectedValue
+	// print committee to verify it is the same accross all servers
+	log.Printf("Committee: %#v", committee)
+
+	// Add up how many times we were selected
+	votes := int64(0)
+	for _, member := range committee {
+		if member == strings.Split(id, ":")[1] {
+			votes++
+		}
+	}
+
+	return "hash", "proof", votes
 }
 
 // The main service loop.
 func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
+
 	algorand := Algorand{
 		AppendBlockChan: make(chan AppendBlockInput),
 		AppendTransactionChan: make(chan AppendTransactionInput),
@@ -144,17 +156,30 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 	peerClients := make(map[string]pb.AlgorandClient)
 	peerCount := int64(0)
+	userIds := make([]string, len(*peers) + 1)
 
-	for _, peer := range *peers {
+	for i, peer := range *peers {
 		client, err := connectToPeer(peer)
 		if err != nil {
 			log.Fatalf("Failed to connect to GRPC server %v", err)
 		}
 
 		peerClients[peer] = client
+
+		split := strings.Split(peer, ":")
+		userIds[i] = split[1]
+
 		peerCount++
 		log.Printf("Connected to %v", peer)
 	}
+
+	// add my Id to pool of userIds
+	split := strings.Split(id, ":")
+	userIds[len(userIds) - 1] = split[1]
+
+	// sort userIds so all Algorand servers have the same list of userIds
+	sort.Strings(userIds)
+	log.Printf("UserIds: %#v", userIds)
 
 	type AppendBlockResponse struct {
 		ret *pb.AppendBlockRet
@@ -194,36 +219,32 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				proposedBlock := state.tempBlock
 
 				// placeholder until we propose seeds in agreement
-				roundSeed := state.seed + state.round
+				// roundSeed := state.seed + state.round
 
-				hash, proof, votes := sortition(state.privateKey, roundSeed, "proposer")
+				// each server needs exact same seed per round so they all see the same selection
+				hash, proof, votes := sortition(state.privateKey, state.round, "proposer", id, userIds, int64(2))
 
 				// start at period 1
 				period := 1
 
-				log.Printf("hash - %v, proof - %v, votes - %v, period - %v", hash, proof, votes, period)
+				log.Printf("hash - %v, proof - %v, period - %v, votes - %v", hash, proof, period, votes)
 
 				// Value proposal step
 				for votes > 0 {
 					// broadcast proposal
 					for p, c := range peerClients {
-
 						go func(c pb.AlgorandClient, p string, proposedBlock pb.Block) {
 							log.Printf("Sent proposal to peer %v", p)
 							ret, err := c.ProposeBlock(context.Background(), &pb.ProposeBlockArgs{Block: &proposedBlock})
 							proposeBlockResponseChan <- ProposeBlockResponse{ret: ret, err: err, peer: p}
 						}(c, p, proposedBlock)
 					}
-
 					// if period == 1 || (period > 1 && emptyNextVote) {
 					// 	// propose own value
 					// }
-
 					votes--
 				}
-
 				state.lastCompletedRound++
-
 			}
 
 			restartTimer(timer)

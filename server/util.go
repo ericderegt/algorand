@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"time"
+	"math/rand"
 
 	"github.com/nyu-distributed-systems-fa18/algorand/pb"
 )
@@ -34,4 +35,37 @@ func generateBlock(oldBlock *pb.Block, tx *pb.Transaction) *pb.Block {
 	newBlock.Hash = calculateHash(newBlock) // set to the hash of all the bytes of this block
 
 	return newBlock
+}
+
+func makeRange(min, max int64) []int64 {
+    a := make([]int64, max-min+1)
+    for i := range a {
+        a[i] = min + int64(i)
+    }
+    return a
+}
+
+func shuffle_selection(arr []string, seed int64, k int64) []string {
+	// create copy of arr that will be suffled
+	shuffled := make([]string, len(arr))
+	copy(shuffled, arr)
+	
+	// set up array to return as selected elements
+	// and random number generator
+	selection := make([]string, k)
+	s := rand.NewSource(seed)
+	rand := rand.New(s)
+
+	// shuffle the array
+	for i := len(shuffled)-1; i >= 0; i-- {
+		random_idx := rand.Intn(i + 1)
+		shuffled[i], shuffled[random_idx] = shuffled[random_idx], shuffled[i]
+	 }
+
+	// select the top k elements from shuffled as the selection
+	for i := range selection {
+		selection[i] = shuffled[i]
+	}
+
+	return selection
 }
