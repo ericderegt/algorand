@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sort"
 	// "math/rand"
+	"strconv"
 
 	context "golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -22,13 +23,8 @@ type ServerState struct {
 	round		 int64
 	lastCompletedRound int64
 	tempBlock	 pb.Block
-	seed int64
-}
-
-type SIGRet struct {
-	userId string
-	message []string
-	signedMessage string
+	proposedBlock pb.Block
+	seed string
 }
 
 type AppendBlockInput struct {
@@ -123,9 +119,9 @@ func restartTimer(timer *time.Timer) {
 	timer.Reset(5000 * time.Millisecond)
 }
 
-func sortition(privateKey int64, seed int64, role string, id string, userIds []string, k int64) (string, string, int64) {
+func sortition(privateKey int64, round int64, role string, id string, userIds []string, k int64) (string, string, int64) {
 	// sortition selects k committee members out of all users
-	committee := shuffle_selection(userIds, seed, k)
+	committee := shuffle_selection(userIds, round, k)
 
 	// print committee to verify it is the same accross all servers
 	log.Printf("Committee: %#v", committee)
@@ -157,7 +153,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		publicKey: 0,
 		round: 0,
 		lastCompletedRound: 0,
-		seed: int64(port),
+		seed: "thisshouldbeahash", // R in the paper
 	}
 
 	peerClients := make(map[string]pb.AlgorandClient)
@@ -181,6 +177,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 	// add my Id to pool of userIds
 	split := strings.Split(id, ":")
+	userId := split[1]
 	userIds[len(userIds) - 1] = split[1]
 
 	// sort userIds so all Algorand servers have the same list of userIds
@@ -221,31 +218,30 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			if state.lastCompletedRound == state.round {
 				state.round++
 
-				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
-				proposedBlock := state.tempBlock
-
-				// placeholder until we propose seeds in agreement
-				// roundSeed := state.seed + state.round
-
 				// each server needs exact same seed per round so they all see the same selection
-				hash, proof, votes := sortition(state.privateKey, state.round, "proposer", id, userIds, int64(2))
+				_, _, votes := sortition(state.privateKey, state.round, "proposer", id, userIds, int64(2))
 
 				// start at period 1
 				period := 1
 
-				// credential := SIG()
+				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
+				state.proposedBlock = state.tempBlock
 
-				log.Printf("hash - %v, proof - %v, period - %v, votes - %v", hash, proof, period, votes)
+				v := calculateHash(&state.proposedBlock)
+
+				sigParams := []string{state.seed, strconv.Itoa(period)}
+
+				sig := SIG(userId, sigParams)
 
 				// Value proposal step
 				for votes > 0 {
 					// broadcast proposal
 					for p, c := range peerClients {
-						go func(c pb.AlgorandClient, p string, proposedBlock pb.Block) {
+						go func(c pb.AlgorandClient, p string, v string, sig *pb.SIGRet) {
 							log.Printf("Sent proposal to peer %v", p)
-							ret, err := c.ProposeBlock(context.Background(), &pb.ProposeBlockArgs{Block: &proposedBlock})
+							ret, err := c.ProposeBlock(context.Background(), &pb.ProposeBlockArgs{Block: v, Credential: sig})
 							proposeBlockResponseChan <- ProposeBlockResponse{ret: ret, err: err, peer: p}
-						}(c, p, proposedBlock)
+						}(c, p, v, sig)
 					}
 					// if period == 1 || (period > 1 && emptyNextVote) {
 					// 	// propose own value
@@ -329,8 +325,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			log.Printf("AppendTransactionResponse: %#v", atr)
 
 		case pb := <-algorand.ProposeBlockChan:
-			log.Printf("ProposeBlock from %v", pb.arg.Peer)
-
+			log.Printf("ProposeBlock from %v", pb.arg.Block)
 			// verfiySort
 		case pbr := <-proposeBlockResponseChan:
 			log.Printf("ProposeBlockResponse: %#v", pbr)

@@ -49,8 +49,8 @@ message AppendTransactionRet {
 }
 
 message ProposeBlockArgs {
-    string peer = 1;
-    Block block = 2;
+    SIGRet credential = 1;
+    string block = 2;
 }
 
 message ProposeBlockRet {
@@ -64,7 +64,9 @@ message SIGArgs {
 }
 
 message SIGRet {
-    bool success = 1;
+    string userId = 1;
+    repeated string message = 2;
+    string signedMessage = 3;
 }
 
 // Algorand service

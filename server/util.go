@@ -80,7 +80,7 @@ func shuffle_selection(arr []string, seed int64, k int64) []string {
 	return selection
 }
 
-func SIG(i string, message []string) SIGRet {
+func SIG(i string, message []string) *pb.SIGRet {
 	signedMessage := signMessage(message)
-	return SIGRet{userId: i, message: message, signedMessage: signedMessage}
+	return &pb.SIGRet{UserId: i, Message: message, SignedMessage: signedMessage}
 }
