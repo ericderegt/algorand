@@ -57,10 +57,12 @@ message ProposeBlockRet {
     bool success = 1;
 }
 
-message SIGArgs {
-    string v = 1;
-    string type = 2;
-    int64 p = 3;
+message VoteArgs {
+    SIGRet message = 1;
+}
+
+message VoteRet {
+    bool success = 1;
 }
 
 message SIGRet {
@@ -74,7 +76,7 @@ service Algorand {
     rpc AppendBlock(AppendBlockArgs) returns (AppendBlockRet) {}
     rpc AppendTransaction(AppendTransactionArgs) returns (AppendTransactionRet) {}
     rpc ProposeBlock(ProposeBlockArgs) returns (ProposeBlockRet) {}
-    rpc SIG(SIGArgs) returns (SIGRet) {}
+    rpc Vote(VoteArgs) returns (VoteRet) {}
 }
 
 message Blockchain {

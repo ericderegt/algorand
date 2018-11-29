@@ -56,7 +56,7 @@ func makeRange(min, max int64) []int64 {
     return a
 }
 
-func shuffle_selection(arr []string, seed int64, k int64) []string {
+func shuffleSelection(arr []string, seed int64, k int64) []string {
 	// create copy of arr that will be suffled
 	shuffled := make([]string, len(arr))
 	copy(shuffled, arr)
@@ -83,7 +83,7 @@ func shuffle_selection(arr []string, seed int64, k int64) []string {
 
 func sortition(privateKey int64, round int64, role string, userId string, userIds []string, k int64) (string, string, int64) {
 	// sortition selects k committee members out of all users
-	committee := shuffle_selection(userIds, round, k)
+	committee := shuffleSelection(userIds, round, k)
 
 	// print committee to verify it is the same accross all servers
 	log.Printf("Committee: %#v", committee)
@@ -99,8 +99,8 @@ func sortition(privateKey int64, round int64, role string, userId string, userId
 	return "hash", "proof", votes
 }
 
-func verify_sort(userId string, userIds []string, round int64, k int64) bool {
-	committee := shuffle_selection(userIds, round, k)
+func verifySort(userId string, userIds []string, round int64, k int64) bool {
+	committee := shuffleSelection(userIds, round, k)
 
 	// loop through committee and verify userId is in there
 	for _, member := range committee {

@@ -18,13 +18,23 @@ import (
 
 // Persistent and volatile state
 type ServerState struct {
-	privateKey   int64
-	publicKey 	 int64
-	round		 int64
-	lastCompletedRound int64
-	tempBlock	 pb.Block
-	proposedBlock pb.Block
-	seed string
+	privateKey   		int64
+	publicKey 	 		int64
+	round		 		int64
+	lastCompletedRound 	int64
+	tempBlock	 		pb.Block
+	proposedBlock 		pb.Block
+	seed 				string
+
+	periodState			PeriodState
+	lastPeriodState		PeriodState
+}
+
+type PeriodState struct {
+	nextVotes	map[string]int64
+	softVotes	map[string]int64
+	certVotes	map[string]int64
+	period		int64
 }
 
 type AppendBlockInput struct {
@@ -42,10 +52,16 @@ type ProposeBlockInput struct {
 	response chan pb.ProposeBlockRet
 }
 
+type VoteInput struct {
+	arg *pb.VoteArgs
+	response chan pb.VoteRet
+}
+
 type Algorand struct {
 	AppendBlockChan chan AppendBlockInput
 	AppendTransactionChan chan AppendTransactionInput
 	ProposeBlockChan chan ProposeBlockInput
+	VoteChan chan VoteInput
 }
 
 func (a *Algorand) AppendBlock(ctx context.Context, arg *pb.AppendBlockArgs) (*pb.AppendBlockRet, error) {
@@ -62,8 +78,11 @@ func (a *Algorand) AppendTransaction(ctx context.Context, arg *pb.AppendTransact
 	return &result, nil
 }
 
-func (a *Algorand) SIG(ctx context.Context, arg *pb.SIGArgs) (*pb.SIGRet, error) {
-	return nil, nil
+func (a *Algorand) Vote(ctx context.Context, arg *pb.VoteArgs) (*pb.VoteRet, error) {
+	c := make(chan pb.VoteRet)
+	a.VoteChan <- VoteInput{arg: arg, response: c}
+	result := <-c
+	return &result, nil
 }
 
 func (a *Algorand) ProposeBlock(ctx context.Context, arg *pb.ProposeBlockArgs) (*pb.ProposeBlockRet, error) {
@@ -117,6 +136,17 @@ func restartTimer(timer *time.Timer) {
 
 	}
 	timer.Reset(5000 * time.Millisecond)
+}
+
+func initPeriodState(p int64) PeriodState {
+	newPeriodState := PeriodState{
+		nextVotes: make(map[string]int64),
+		softVotes: make(map[string]int64),
+		certVotes: make(map[string]int64),
+		period: p,
+	}
+
+	return newPeriodState
 }
 
 // The main service loop.
@@ -207,14 +237,18 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				_, _, votes := sortition(state.privateKey, state.round, "proposer", userId, userIds, k)
 
 				// start at period 1
-				period := 1
+				period := int64(1)
+
+				// initialize periodState
+				state.lastPeriodState = state.periodState
+				state.periodState = initPeriodState(period)
 
 				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
 				state.proposedBlock = state.tempBlock
 
 				v := calculateHash(&state.proposedBlock)
 
-				sigParams := []string{state.seed, strconv.Itoa(period)}
+				sigParams := []string{state.seed, strconv.FormatInt(period, 10)}
 
 				sig := SIG(userId, sigParams)
 
@@ -313,7 +347,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			proposerId := pb.arg.Credential.UserId
 			log.Printf("ProposeBlock from %v", proposerId)
 
-			verified := verify_sort(proposerId, userIds, state.round, k)
+			verified := verifySort(proposerId, userIds, state.round, k)
 			if verified {
 				log.Printf("VERIFIED that %v is on the committee for round %v", proposerId, state.round)
 			} else {
