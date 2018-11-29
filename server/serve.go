@@ -25,6 +25,12 @@ type ServerState struct {
 	seed int64
 }
 
+type SIGRet struct {
+	userId string
+	message []string
+	signedMessage string
+}
+
 type AppendBlockInput struct {
 	arg	*pb.AppendBlockArgs
 	response chan pb.AppendBlockRet
@@ -227,6 +233,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				// start at period 1
 				period := 1
 
+				// credential := SIG()
+
 				log.Printf("hash - %v, proof - %v, period - %v, votes - %v", hash, proof, period, votes)
 
 				// Value proposal step
@@ -323,9 +331,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		case pb := <-algorand.ProposeBlockChan:
 			log.Printf("ProposeBlock from %v", pb.arg.Peer)
 
-			// for now, just check if blockchain is longer than ours
-			// if yes, overwrite ours and return true
-			// if no, return false
+			// verfiySort
 		case pbr := <-proposeBlockResponseChan:
 			log.Printf("ProposeBlockResponse: %#v", pbr)
 		}
