@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
-	// "math"
 	"net"
 	"time"
+	"math/rand"
 
 	context "golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -17,8 +17,10 @@ import (
 type ServerState struct {
 	privateKey   int64
 	publicKey 	 int64
-	period		 int64
+	round		 int64
+	lastCompletedRound int64
 	tempBlock	 pb.Block
+	seed int64
 }
 
 type AppendBlockInput struct {
@@ -31,9 +33,15 @@ type AppendTransactionInput struct {
 	response chan pb.AppendTransactionRet
 }
 
+type ProposeBlockInput struct {
+	arg *pb.ProposeBlockArgs
+	response chan pb.ProposeBlockRet
+}
+
 type Algorand struct {
 	AppendBlockChan chan AppendBlockInput
 	AppendTransactionChan chan AppendTransactionInput
+	ProposeBlockChan chan ProposeBlockInput
 }
 
 func (a *Algorand) AppendBlock(ctx context.Context, arg *pb.AppendBlockArgs) (*pb.AppendBlockRet, error) {
@@ -52,6 +60,13 @@ func (a *Algorand) AppendTransaction(ctx context.Context, arg *pb.AppendTransact
 
 func (a *Algorand) SIG(ctx context.Context, arg *pb.SIGArgs) (*pb.SIGRet, error) {
 	return nil, nil
+}
+
+func (a *Algorand) ProposeBlock(ctx context.Context, arg *pb.ProposeBlockArgs) (*pb.ProposeBlockRet, error) {
+	c := make(chan pb.ProposeBlockRet)
+	a.ProposeBlockChan <- ProposeBlockInput{arg: arg, response: c}
+	result := <-c
+	return &result, nil
 }
 
 // Launch a GRPC service for this peer.
@@ -88,11 +103,33 @@ func connectToPeer(peer string) (pb.AlgorandClient, error) {
 	return pb.NewAlgorandClient(conn), nil
 }
 
+func restartTimer(timer *time.Timer) {
+	stopped := timer.Stop()
+
+	if !stopped {
+		for len(timer.C) > 0 {
+			<-timer.C
+		}
+
+	}
+	timer.Reset(5000 * time.Millisecond)
+}
+
+func sortition(privateKey int64, seed int64, role string) (string, string, int64) {
+	// select half of nodes to propose to start
+	source := rand.NewSource(seed)
+	newRand := rand.New(source)
+	selectedValue := int64(newRand.Intn(2))
+
+	return "hash", "proof", selectedValue
+}
+
 // The main service loop.
 func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	algorand := Algorand{
 		AppendBlockChan: make(chan AppendBlockInput),
 		AppendTransactionChan: make(chan AppendTransactionInput),
+		ProposeBlockChan: make(chan ProposeBlockInput),
 	}
 	// Start in a Go routine so it doesn't affect us.
 	go RunAlgorandServer(&algorand, port)
@@ -100,7 +137,9 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	state := ServerState{
 		privateKey: 0,
 		publicKey: 0,
-		period: 1,
+		round: 0,
+		lastCompletedRound: 0,
+		seed: int64(port),
 	}
 
 	peerClients := make(map[string]pb.AlgorandClient)
@@ -129,16 +168,69 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		peer string
 	}
 
+	type ProposeBlockResponse struct {
+		ret *pb.ProposeBlockRet
+		err error
+		peer string
+	}
+
 	appendBlockResponseChan := make(chan AppendBlockResponse)
 	appendTransactionResponseChan := make(chan AppendTransactionResponse)
+	proposeBlockResponseChan := make(chan ProposeBlockResponse)
+
+	// Set timer to check for new rounds
+	timer := time.NewTimer(5000 * time.Millisecond)
 
 	// Run forever handling inputs from various channels
 	for {
 		select{
+		case <-timer.C:
+			log.Printf("Timer went off")
+
+			if state.lastCompletedRound == state.round {
+				state.round++
+
+				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
+				proposedBlock := state.tempBlock
+
+				// placeholder until we propose seeds in agreement
+				roundSeed := state.seed + state.round
+
+				hash, proof, votes := sortition(state.privateKey, roundSeed, "proposer")
+
+				// start at period 1
+				period := 1
+
+				log.Printf("hash - %v, proof - %v, votes - %v, period - %v", hash, proof, votes, period)
+
+				// Value proposal step
+				for votes > 0 {
+					// broadcast proposal
+					for p, c := range peerClients {
+
+						go func(c pb.AlgorandClient, p string, proposedBlock pb.Block) {
+							log.Printf("Sent proposal to peer %v", p)
+							ret, err := c.ProposeBlock(context.Background(), &pb.ProposeBlockArgs{Block: &proposedBlock})
+							proposeBlockResponseChan <- ProposeBlockResponse{ret: ret, err: err, peer: p}
+						}(c, p, proposedBlock)
+					}
+
+					// if period == 1 || (period > 1 && emptyNextVote) {
+					// 	// propose own value
+					// }
+
+					votes--
+				}
+
+				state.lastCompletedRound++
+
+			}
+
+			restartTimer(timer)
 		case op := <-bcs.C:
 			// Received a command from client
 			// TODO: Add Transaction to our local block, broadcast to every user
-			log.Printf("Transaction request: %#v, Period: %v", op.command.Arg, state.period)
+			log.Printf("Transaction request: %#v, Round: %v", op.command.Arg, state.round)
 
 			if op.command.Operation == pb.Op_SEND {
 				state.tempBlock.Tx = append(state.tempBlock.Tx, op.command.GetTx())
@@ -207,6 +299,14 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			// we got a response to our AppendTransaction request
 			log.Printf("AppendTransactionResponse: %#v", atr)
 
+		case pb := <-algorand.ProposeBlockChan:
+			log.Printf("ProposeBlock from %v", pb.arg.Peer)
+
+			// for now, just check if blockchain is longer than ours
+			// if yes, overwrite ours and return true
+			// if no, return false
+		case pbr := <-proposeBlockResponseChan:
+			log.Printf("ProposeBlockResponse: %#v", pbr)
 		}
 	}
 	log.Printf("Strange to arrive here")
