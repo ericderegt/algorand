@@ -32,6 +32,7 @@ type ServerState struct {
 }
 
 type PeriodState struct {
+	proposedValues	map[string]string
 	nextVotes	map[string]int64
 	softVotes	map[string]int64
 	certVotes	map[string]int64
@@ -136,11 +137,12 @@ func restartTimer(timer *time.Timer, ms int64) {
 		}
 
 	}
-	timer.Reset(ms * time.Millisecond)
+	timer.Reset(time.Duration(ms) * time.Millisecond)
 }
 
 func initPeriodState(p int64) PeriodState {
 	newPeriodState := PeriodState{
+		proposedValues: make(map[string]string),
 		nextVotes: make(map[string]int64),
 		softVotes: make(map[string]int64),
 		certVotes: make(map[string]int64),
@@ -239,8 +241,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				_, _, votes := sortition(state.privateKey, state.round, "proposer", userId, userIds, k)
 
 				// start at period 1, step 1
-				state.period := int64(1)
-				state.step := int64(1)
+				state.period = int64(1)
+				state.step = int64(1)
 
 				// initialize periodState and move p-1 state to lastPeriodState
 				state.lastPeriodState = state.periodState
@@ -251,7 +253,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 				v := calculateHash(&state.proposedBlock)
 
-				sigParams := []string{state.seed, strconv.FormatInt(period, 10)}
+				sigParams := []string{state.seed, strconv.FormatInt(state.period, 10)}
 
 				sig := SIG(userId, sigParams)
 
@@ -276,18 +278,18 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			restartTimer(roundTimer, 5000)
 		case <-agreementTimer.C:
 			// if we are currently in agreement protocol
-			if state.lastCompletedRound == state.round - 1 and state.step < 5 {
+			if state.lastCompletedRound == state.round - 1 && state.step < 5 {
 				state.step++
 			}
 
 			if state.step == 2 {
-				runStep2()
+				runStep2(&state.periodState, &state.lastPeriodState)
 			} else if state.step == 3 {
-				runStep3()
+				runStep3(&state.periodState, &state.lastPeriodState)
 			} else if state.step == 4 {
-				runStep4()
+				runStep4(&state.periodState, &state.lastPeriodState)
 			} else if state.step == 5 {
-				runStep5()
+				runStep5(&state.periodState, &state.lastPeriodState)
 			}
 
 			restartTimer(agreementTimer, 2000)
@@ -363,15 +365,23 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			// we got a response to our AppendTransaction request
 			log.Printf("AppendTransactionResponse: %#v", atr)
 
-		case pb := <-algorand.ProposeBlockChan:
-			proposerId := pb.arg.Credential.UserId
+		case pbc := <-algorand.ProposeBlockChan:
+			proposerId := pbc.arg.Credential.UserId
 			log.Printf("ProposeBlock from %v", proposerId)
 
 			verified := verifySort(proposerId, userIds, state.round, k)
 			if verified {
 				log.Printf("VERIFIED that %v is on the committee for round %v", proposerId, state.round)
+
+				proposerCredential := []string{pbc.arg.Credential.UserId, pbc.arg.Credential.SignedMessage}
+
+				proposerHash := signMessage(proposerCredential)
+				// add verified block to list of blocks I've seen this period
+				state.periodState.proposedValues[proposerHash] = pbc.arg.Block
+				pbc.response <- pb.ProposeBlockRet{Success: true}
 			} else {
-				log.Printf("DENIED that %v is on the committee for round %v", proposerId, state.round)
+				// rejected proposed block
+				pbc.response <- pb.ProposeBlockRet{Success: false}
 			}
 
 		case pbr := <-proposeBlockResponseChan:

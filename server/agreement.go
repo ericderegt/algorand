@@ -1,23 +1,24 @@
 package main
 
 import (
-	"log"
+	// "log"
 
-	"github.com/nyu-distributed-systems-fa18/algorand/pb"
+	// "github.com/nyu-distributed-systems-fa18/algorand/pb"
 )
 
-func runStep2() {
+// &state.periodState, &state.lastPeriodState
+func runStep2(currentPeriod *PeriodState, lastPeriod *PeriodState) {
 
 }
 
-func runStep3() {
+func runStep3(currentPeriod *PeriodState, lastPeriod *PeriodState) {
 
 }
 
-func runStep4() {
+func runStep4(currentPeriod *PeriodState, lastPeriod *PeriodState) {
 
 }
 
-func runStep5() {
+func runStep5(currentPeriod *PeriodState, lastPeriod *PeriodState) {
 
 }
