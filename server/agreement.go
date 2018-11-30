@@ -26,13 +26,25 @@ func runStep2(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
   } else if (voteValue != "_|_" && votes >= requiredVotes) {
     return voteValue
   }
-
-
   return ""
 }
 
-func runStep3(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes int64) {
+func runStep3(currentPeriod *PeriodState, requiredVotes int64) {
+  var voteValue string
+  votes := int64(0)
 
+  for value, numVotes := range currentPeriod.softVotes {
+    // find max value
+    if numVotes > votes {
+      voteValue = value
+      votes = numVotes
+    }
+  }
+
+  if (voteValue == "_|_" && votes >= requiredVotes) {
+    return voteValue
+  }  
+  return ""
 }
 
 func runStep4(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes int64) {

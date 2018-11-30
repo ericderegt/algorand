@@ -314,14 +314,27 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 					for p, c := range peerClients {
 						go func(c pb.AlgorandClient, p string, softVoteSIG *pb.SIGRet) {
-							log.Printf("Sent vote to peer %v", p)
+							log.Printf("Sent soft vote to peer %v", p)
 							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: softVoteSIG})
 							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
 						}(c, p, softVoteSIG)
 					}
 				}
 			} else if state.step == 3 {
-				runStep3(&state.periodState, &state.lastPeriodState, requiredVotes)
+				certVoteV := runStep3(&state.periodState, requiredVotes)
+
+				if certVoteV != "" {
+					message := []string{certVoteV, "cert", strconv.FormatInt(state.period, 10)}
+					certVoteSIG := SIG(userId, message)
+
+					for p, c := range peerClients {
+						go func(c pb.AlgorandClient, p string, certVoteSIG *pb.SIGRet) {
+							log.Printf("Sent cert vote to peer %v", p)
+							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: certVoteSIG})
+							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
+						}(c, p, certVoteSIG)
+					}
+				}
 			} else if state.step == 4 {
 				runStep4(&state.periodState, &state.lastPeriodState, requiredVotes)
 			} else if state.step == 5 {
