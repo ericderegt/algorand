@@ -8,6 +8,7 @@ import (
 	"time"
 	"math/rand"
 	"strings"
+	"strconv"
 
 	"github.com/nyu-distributed-systems-fa18/algorand/pb"
 )
@@ -56,37 +57,62 @@ func makeRange(min, max int64) []int64 {
     return a
 }
 
-func shuffleSelection(arr []string, seed int64, k int64) []string {
-	// create copy of arr that will be suffled
-	shuffled := make([]string, len(arr))
-	copy(shuffled, arr)
+func initStake(userIds []string, min, max int) map[string]int {
+	idToStake := make(map[string]int)
 
+	for _, id := range userIds {
+		seed,_ := strconv.ParseInt(id, 10, 64)
+		s := rand.NewSource(seed)
+		rand := rand.New(s)
+		stake := min + rand.Intn(max - min)
+
+		idToStake[id] = stake
+	}
+	return idToStake
+}
+
+func generateCandidatesByStake(userIds []string, idToStake map[string]int) []string {
+	// add up the total stake and create new array with that many slots
+	totalStake := 0
+	for _, v := range idToStake {
+		totalStake += v
+	}
+	candidates := make([]string, totalStake)
+
+	// add user to candidates as many times as they have stake
+	i := 0
+	for _,member := range userIds {
+		for j := 0; j < idToStake[member]; j++ {
+			candidates[i] = member
+			i++
+		}
+	}
+
+	return candidates
+}
+
+func committeeSelection(arr []string, seed int64, k int64) []string {
 	// set up array to return as selected elements
 	// and random number generator
 	selection := make([]string, k)
 	s := rand.NewSource(seed)
 	rand := rand.New(s)
 
-	// shuffle the array
-	for i := len(shuffled)-1; i >= 0; i-- {
-		random_idx := rand.Intn(i + 1)
-		shuffled[i], shuffled[random_idx] = shuffled[random_idx], shuffled[i]
-	 }
-
-	// select the top k elements from shuffled as the selection
-	for i := range selection {
-		selection[i] = shuffled[i]
+	i := int64(0)
+	for i = 0; i < k; i++ {
+		random_idx := rand.Intn(len(arr))
+		selection[i] = arr[random_idx]
 	}
 
 	return selection
 }
 
-func sortition(privateKey int64, round int64, role string, userId string, userIds []string, k int64) (string, string, int64) {
+func sortition(privateKey int64, round int64, role string, userId string, candidates []string, k int64) (string, string, int64) {
 	// sortition selects k committee members out of all users
-	committee := shuffleSelection(userIds, round, k)
+	committee := committeeSelection(candidates, round, k)
 
 	// print committee to verify it is the same accross all servers
-	log.Printf("Committee: %#v", committee)
+	log.Printf("Round %v Committee: %#v", round, committee)
 
 	// Add up how many times we were selected
 	votes := int64(0)
@@ -99,8 +125,8 @@ func sortition(privateKey int64, round int64, role string, userId string, userId
 	return "hash", "proof", votes
 }
 
-func verifySort(userId string, userIds []string, round int64, k int64) bool {
-	committee := shuffleSelection(userIds, round, k)
+func verifySort(userId string, candidates []string, round int64, k int64) bool {
+	committee := committeeSelection(candidates, round, k)
 
 	// loop through committee and verify userId is in there
 	for _, member := range committee {
