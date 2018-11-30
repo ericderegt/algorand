@@ -23,7 +23,11 @@ func runStep2(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
   if currentPeriod.period == 1 || (voteValue == "_|_" && votes >= requiredVotes) {
     leadersValue := selectLeader(currentPeriod.proposedValues)
     return leadersValue
+  } else if (voteValue != "_|_" && votes >= requiredVotes) {
+    return voteValue
   }
+
+
   return ""
 }
 
