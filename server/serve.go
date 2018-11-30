@@ -442,6 +442,31 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		case vc := <-algorand.VoteChan:
 			log.Printf("VoteChan: %#v", vc)
 
+			voteValue := vc.arg.Message.Message[0]
+			voteType := vc.arg.Message.Message[1]
+			votePeriod, _ := strconv.ParseInt(vc.arg.Message.Message[2], 10, 64)
+
+			if voteType == "soft" {
+				if votePeriod == state.periodState.period {
+					state.periodState.softVotes[voteValue]++
+				} else if votePeriod == state.lastPeriodState.period {
+					state.lastPeriodState.softVotes[voteValue]++
+				}
+			} else if voteType == "cert" {
+				if votePeriod == state.periodState.period {
+					state.periodState.certVotes[voteValue]++
+				} else if votePeriod == state.lastPeriodState.period {
+					state.lastPeriodState.certVotes[voteValue]++
+				}
+			} else if voteType == "next" {
+				if votePeriod == state.periodState.period {
+					state.periodState.nextVotes[voteValue]++
+				} else if votePeriod == state.lastPeriodState.period {
+					state.lastPeriodState.nextVotes[voteValue]++
+				}
+			}
+
+
 		case vr := <-voteResponseChan:
 			log.Printf("VoteResponse: %#v", vr)
 

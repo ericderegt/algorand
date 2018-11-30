@@ -29,7 +29,7 @@ func runStep2(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
   return ""
 }
 
-func runStep3(currentPeriod *PeriodState, requiredVotes int64) {
+func runStep3(currentPeriod *PeriodState, requiredVotes int64) string {
   var voteValue string
   votes := int64(0)
 
@@ -43,14 +43,14 @@ func runStep3(currentPeriod *PeriodState, requiredVotes int64) {
 
   if (voteValue == "_|_" && votes >= requiredVotes) {
     return voteValue
-  }  
+  }
   return ""
 }
 
-func runStep4(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes int64) {
-
+func runStep4(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes int64) string {
+  return ""
 }
 
-func runStep5(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes int64) {
-
+func runStep5(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes int64) string {
+  return ""
 }
