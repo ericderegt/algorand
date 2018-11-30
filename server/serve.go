@@ -280,6 +280,16 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				state.step++
 			}
 
+			if state.step == 2 {
+				runStep2()
+			} else if state.step == 3 {
+				runStep3()
+			} else if state.step == 4 {
+				runStep4()
+			} else if state.step == 5 {
+				runStep5()
+			}
+
 			restartTimer(agreementTimer, 2000)
 		case op := <-bcs.C:
 			// Received a command from client
