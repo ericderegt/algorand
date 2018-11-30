@@ -127,7 +127,7 @@ func connectToPeer(peer string) (pb.AlgorandClient, error) {
 	return pb.NewAlgorandClient(conn), nil
 }
 
-func restartTimer(timer *time.Timer) {
+func restartTimer(timer *time.Timer, ms int64) {
 	stopped := timer.Stop()
 
 	if !stopped {
@@ -136,7 +136,7 @@ func restartTimer(timer *time.Timer) {
 		}
 
 	}
-	timer.Reset(5000 * time.Millisecond)
+	timer.Reset(ms * time.Millisecond)
 }
 
 func initPeriodState(p int64) PeriodState {
@@ -220,7 +220,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	proposeBlockResponseChan := make(chan ProposeBlockResponse)
 
 	// Set timer to check for new rounds
-	timer := time.NewTimer(5000 * time.Millisecond)
+	roundTimer := time.NewTimer(5000 * time.Millisecond)
+	agreementTimer := time.NewTimer(2000 * time.Millisecond)
 
 	// set hardcode k to be 2 for now, so 2 members will always be selected to committee
 	k := int64(2)
@@ -228,8 +229,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	// Run forever handling inputs from various channels
 	for {
 		select{
-		case <-timer.C:
-			log.Printf("Timer went off")
+		case <-roundTimer.C:
+			log.Printf("Round Timer went off")
 
 			if state.lastCompletedRound == state.round {
 				state.round++
@@ -272,7 +273,14 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				state.lastCompletedRound++
 			}
 
-			restartTimer(timer)
+			restartTimer(roundTimer, 5000)
+		case <-agreementTimer.C:
+			// if we are currently in agreement protocol
+			if state.lastCompletedRound == state.round - 1 and state.step < 5 {
+				state.step++
+			}
+
+			restartTimer(agreementTimer, 2000)
 		case op := <-bcs.C:
 			// Received a command from client
 			// TODO: Add Transaction to our local block, broadcast to every user
