@@ -25,9 +25,10 @@ type ServerState struct {
 	tempBlock	 		pb.Block
 	proposedBlock 		pb.Block
 	seed 				string
-
 	periodState			PeriodState
 	lastPeriodState		PeriodState
+	period int64
+	step int64
 }
 
 type PeriodState struct {
@@ -236,12 +237,13 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				// each server needs exact same seed per round so they all see the same selection
 				_, _, votes := sortition(state.privateKey, state.round, "proposer", userId, userIds, k)
 
-				// start at period 1
-				period := int64(1)
+				// start at period 1, step 1
+				state.period := int64(1)
+				state.step := int64(1)
 
-				// initialize periodState
+				// initialize periodState and move p-1 state to lastPeriodState
 				state.lastPeriodState = state.periodState
-				state.periodState = initPeriodState(period)
+				state.periodState = initPeriodState(state.period)
 
 				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
 				state.proposedBlock = state.tempBlock
