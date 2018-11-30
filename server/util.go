@@ -141,3 +141,20 @@ func SIG(i string, message []string) *pb.SIGRet {
 	signedMessage := signMessage(message)
 	return &pb.SIGRet{UserId: i, Message: message, SignedMessage: signedMessage}
 }
+
+func selectLeader(proposedValues map[string]string) string {
+	minCredential := ""
+	value := ""
+
+	for k, v := range proposedValues {
+		if minCredential == "" {
+			minCredential = k
+			value = v
+		} else if k < minCredential {
+			minCredential = k
+			value = v
+		}
+	}
+
+	return value
+}
