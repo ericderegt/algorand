@@ -250,6 +250,10 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	// generate candidates using every user's stake which will be used for sortition
 	candidates := generateCandidatesByStake(userIds, idToStake)
 
+	state.period = int64(1)
+	state.step = int64(1)
+	state.periodState = initPeriodState(state.period)
+
 	// Run forever handling inputs from various channels
 	for {
 		select{
@@ -294,7 +298,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					// }
 					votes--
 				}
-				state.lastCompletedRound++
+				// state.lastCompletedRound++
 			}
 
 			restartTimer(roundTimer, 5000)
@@ -307,6 +311,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 			if state.step == 2 {
 				softVoteV := runStep2(&state.periodState, &state.lastPeriodState, requiredVotes)
+				log.Printf("soft vote is %v", softVoteV)
 
 				if softVoteV != "" {
 					message := []string{softVoteV, "soft", strconv.FormatInt(state.period, 10)}
