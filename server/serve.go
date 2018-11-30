@@ -228,6 +228,12 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	// set hardcode k to be 2 for now, so 2 members will always be selected to committee
 	k := int64(2)
 
+	// intialize everyone's stake between 1 to 10 tokens
+	idToStake := initStake(userIds, 1, 10)
+
+	// generate candidates using every user's stake which will be used for sortition
+	candidates := generateCandidatesByStake(userIds, idToStake)
+
 	// Run forever handling inputs from various channels
 	for {
 		select{
@@ -238,7 +244,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				state.round++
 
 				// each server needs exact same seed per round so they all see the same selection
-				_, _, votes := sortition(state.privateKey, state.round, "proposer", userId, userIds, k)
+				_, _, votes := sortition(state.privateKey, state.round, "proposer", userId, candidates, k)
 
 				// start at period 1, step 1
 				state.period = int64(1)
@@ -369,7 +375,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			proposerId := pbc.arg.Credential.UserId
 			log.Printf("ProposeBlock from %v", proposerId)
 
-			verified := verifySort(proposerId, userIds, state.round, k)
+			verified := verifySort(proposerId, candidates, state.round, k)
 			if verified {
 				log.Printf("VERIFIED that %v is on the committee for round %v", proposerId, state.round)
 
