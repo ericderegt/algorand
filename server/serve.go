@@ -167,7 +167,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	state := ServerState{
 		privateKey: 0,
 		publicKey: 0,
-		round: 0,
+		round: 1,
 		lastCompletedRound: 0,
 		seed: "thisshouldbeahash", // R in the paper
 	}
@@ -239,7 +239,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 	// Set timer to check for new rounds
 	roundTimer := time.NewTimer(5000 * time.Millisecond)
-	agreementTimer := time.NewTimer(2000 * time.Millisecond)
+	agreementTimer := time.NewTimer(10000 * time.Millisecond)
 
 	// set hardcode k to be 2 for now, so 2 members will always be selected to committee
 	k := int64(2)
@@ -254,25 +254,33 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	state.step = int64(1)
 	state.periodState = initPeriodState(state.period)
 
+	// create a variable to handle very first round or propose block
+	firstRound := true
+
 	// Run forever handling inputs from various channels
 	for {
 		select{
 		case <-roundTimer.C:
-			log.Printf("Round Timer went off")
+			// propose block if last round complete or very first round 
+			if state.lastCompletedRound == state.round || firstRound {
+				log.Printf("Starting next round")
 
-			if state.lastCompletedRound == state.round {
-				state.round++
+				// only move to next round and reset period and periodstate if not the first round
+				if !firstRound {
+					state.round++
+
+					// start at period 1, step 1
+					state.period = int64(1)
+					state.step = int64(1)
+
+					// initialize periodState and move p-1 state to lastPeriodState
+					state.lastPeriodState = state.periodState
+					state.periodState = initPeriodState(state.period)
+				}
+				firstRound = false
 
 				// each server needs exact same seed per round so they all see the same selection
 				_, _, votes := sortition(state.privateKey, state.round, "proposer", userId, candidates, k)
-
-				// start at period 1, step 1
-				state.period = int64(1)
-				state.step = int64(1)
-
-				// initialize periodState and move p-1 state to lastPeriodState
-				state.lastPeriodState = state.periodState
-				state.periodState = initPeriodState(state.period)
 
 				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
 				state.proposedBlock = state.tempBlock
@@ -298,7 +306,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					// }
 					votes--
 				}
-				// state.lastCompletedRound++
+				// state.lastCompletedRound = state.round
 			}
 
 			restartTimer(roundTimer, 5000)
@@ -310,10 +318,15 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			}
 
 			if state.step == 2 {
+				log.Printf("STEP 2")
 				softVoteV := runStep2(&state.periodState, &state.lastPeriodState, requiredVotes)
 				log.Printf("soft vote is %v", softVoteV)
 
 				if softVoteV != "" {
+					// add my own vote for this value
+					state.periodState.softVotes[softVoteV]++
+
+					// broadcast my decision to vote for this value
 					message := []string{softVoteV, "soft", strconv.FormatInt(state.period, 10)}
 					softVoteSIG := SIG(userId, message)
 
@@ -326,7 +339,9 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					}
 				}
 			} else if state.step == 3 {
+				log.Printf("STEP 3")
 				certVoteV := runStep3(&state.periodState, requiredVotes)
+				log.Printf("cert vote is %v", certVoteV)
 
 				if certVoteV != "" {
 					message := []string{certVoteV, "cert", strconv.FormatInt(state.period, 10)}
@@ -346,7 +361,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				runStep5(&state.periodState, &state.lastPeriodState, requiredVotes)
 			}
 
-			restartTimer(agreementTimer, 2000)
+			restartTimer(agreementTimer, 20000)
 
 		case op := <-bcs.C:
 			// Received a command from client
@@ -442,15 +457,16 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			}
 
 		case pbr := <-proposeBlockResponseChan:
-			log.Printf("ProposeBlockResponse: %#v", pbr)
+			log.Printf("ProposeBlockResponse from: %v", pbr.peer)
 
 		case vc := <-algorand.VoteChan:
-			log.Printf("VoteChan: %#v", vc)
+			log.Printf("Received vote from: %v", vc.arg.Message.UserId)
 
 			voteValue := vc.arg.Message.Message[0]
 			voteType := vc.arg.Message.Message[1]
 			votePeriod, _ := strconv.ParseInt(vc.arg.Message.Message[2], 10, 64)
 
+			log.Printf("VoteType: %v", voteType)
 			if voteType == "soft" {
 				if votePeriod == state.periodState.period {
 					state.periodState.softVotes[voteValue]++
