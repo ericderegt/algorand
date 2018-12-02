@@ -21,7 +21,7 @@ type ServerState struct {
 	privateKey   		int64
 	publicKey 	 		int64
 	round		 		int64
-	lastCompletedRound 	int64
+	readyForNextRound 	bool
 	tempBlock	 		pb.Block
 	proposedBlock 		pb.Block
 	seed 				string
@@ -142,25 +142,21 @@ func restartTimer(timer *time.Timer, ms int64) {
 	timer.Reset(time.Duration(ms) * time.Millisecond)
 }
 
-func initPeriodState(p int64, v string) PeriodState {
-	startingValue := "_|_"
-	if p > 1 {
-		startingValue = v
-	}
+func initPeriodState(p int64) PeriodState {
 	newPeriodState := PeriodState{
 		proposedValues: make(map[string]string),
 		nextVotes: 		make(map[string]int64),
 		softVotes: 		make(map[string]int64),
 		certVotes: 		make(map[string]int64),
 		myCertVote: 	"",
-		startingValue: 	startingValue,
+		startingValue: 	"",
 		period: 		p,
 	}
 
 	return newPeriodState
 }
 
-func handleHalt() {
+func handleHalt(chain []string, newV string) {
 	// swap period states
 
 	// append block to chain
@@ -188,7 +184,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		privateKey: 0,
 		publicKey: 0,
 		round: 1,
-		lastCompletedRound: 0,
+		readyForNextRound: true,
 		seed: "thisshouldbeahash", // R in the paper
 	}
 
@@ -271,48 +267,27 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	candidates := generateCandidatesByStake(userIds, idToStake)
 
 
-	//////////////////////////////////////////////////////////////////////
-	// TODO: Figure out if we really need to do this once before loop start
-	//////////////////////////////////////////////////////////////////////
-
-	// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
-	state.proposedBlock = state.tempBlock
-
-	v := calculateHash(&state.proposedBlock)
-
+	//Prepare periodState
 	state.period = int64(1)
 	state.step = int64(1)
-	state.periodState = initPeriodState(state.period, v)
+	state.periodState = initPeriodState(state.period)
+	state.periodState.startingValue = "_|_"
 
-	// create a variable to handle very first round or propose block
-	firstRound := true
+	// TODO: Delete this after appending blocks to actual bockchain
+	localChain := []string{}
 
 	// Run forever handling inputs from various channels
 	for {
 		select{
 		case <-roundTimer.C:
 			// propose block if last round complete or very first round 
-			if state.lastCompletedRound == state.round || firstRound {
-				log.Printf("Starting next round")
+			if state.readyForNextRound {
+				log.Printf("Starting round %v", state.round)
+				state.readyForNextRound = false
 
 				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
-				state.proposedBlock = state.tempBlock
-
+				state.proposedBlock = prepareBlock(&state.tempBlock, bcs.blockchain)
 				v := calculateHash(&state.proposedBlock)
-
-				// only move to next round and reset period and periodstate if not the first round
-				if !firstRound {
-					state.round++
-
-					// start at period 1, step 1
-					state.period = int64(1)
-					state.step = int64(1)
-
-					// initialize periodState and move p-1 state to lastPeriodState
-					state.lastPeriodState = state.periodState
-					state.periodState = initPeriodState(state.period, v)
-				}
-				firstRound = false
 
 				// each server needs exact same seed per round so they all see the same selection
 				_, _, votes := sortition(state.privateKey, state.round, "proposer", userId, candidates, k)
@@ -331,19 +306,15 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 							proposeBlockResponseChan <- ProposeBlockResponse{ret: ret, err: err, peer: p}
 						}(c, p, v, sig)
 					}
-					// if period == 1 || (period > 1 && emptyNextVote) {
-					// 	// propose own value
-					// }
 					votes--
 				}
-				// state.lastCompletedRound = state.round
 			}
 
 			restartTimer(roundTimer, 5000)
 
 		case <-agreementTimer.C:
 			// if we are currently in agreement protocol
-			if state.lastCompletedRound == state.round - 1 && state.step < 5 {
+			if !state.readyForNextRound && state.step < 5 {
 				state.step++
 			}
 
@@ -392,9 +363,19 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					// check if our own vote helped us reach requiredVotes
 					haltValue := checkHaltingCondition(&state.periodState, requiredVotes)
 					if haltValue != "" {
-						log.Printf("AGREEMENT! New Block Value: %v", haltValue)
+						log.Printf("AGREEMENT!")
+						localChain = append(localChain, haltValue)
+						log.Printf("Chain: %v", PrettyPrint(localChain))
 
-						// TODO: Figure out to handle halting condition...
+						// Handle Halting Condition
+						state.readyForNextRound = true
+						state.round++
+
+						state.lastPeriodState = PeriodState{}
+						state.period = int64(1)
+						state.step = int64(1)
+						state.periodState = initPeriodState(state.period)
+						state.periodState.startingValue = "_|_"
 					}
 				}
 			} else if state.step == 4 {
@@ -434,6 +415,13 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
 						}(c, p, nextVoteSIG)
 					}
+
+					// finish period
+					state.period ++
+					state.step = 1
+					state.lastPeriodState = state.periodState
+					state.periodState = initPeriodState(state.period)
+					state.periodState.startingValue = calculateHash(&state.proposedBlock)
 				}
 			}
 
@@ -565,9 +553,19 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				// we need to check for halting condition anytime we see a new cert vote
 				haltValue := checkHaltingCondition(&state.periodState, requiredVotes)
 				if haltValue != "" {
-					log.Printf("AGREEMENT! New Block Value: %v", haltValue)
+					log.Printf("AGREEMENT!")
+					localChain = append(localChain, haltValue)
+					log.Printf("Chain: %v", PrettyPrint(localChain))
 
-					// TODO: Figure out to handle halting condition...
+					// Handle Halting Condition
+					state.readyForNextRound = true
+					state.round++
+					
+					state.lastPeriodState = PeriodState{}
+					state.period = int64(1)
+					state.step = int64(1)
+					state.periodState = initPeriodState(state.period)
+					state.periodState.startingValue = "_|_"
 				}
 			} else if voteType == "next" {
 				if votePeriod == state.periodState.period {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"time"
 	"math/rand"
 	"strings"
@@ -47,6 +48,21 @@ func generateBlock(oldBlock *pb.Block, tx *pb.Transaction) *pb.Block {
 	newBlock.Hash = calculateHash(newBlock) // set to the hash of all the bytes of this block
 
 	return newBlock
+}
+
+func prepareBlock(block *pb.Block, blockchain []*pb.Block) pb.Block {
+	if len(blockchain) > 0 {
+		lastBlock := blockchain[len(blockchain)-1]
+		block.Id = lastBlock.Id + 1
+		block.PrevHash = lastBlock.Hash
+	} else {
+		block.Id = 1
+		block.PrevHash = ""
+	}
+	block.Timestamp = time.Now().String()
+	block.Hash = calculateHash(block)
+
+	return *block
 }
 
 func makeRange(min, max int64) []int64 {
@@ -157,4 +173,12 @@ func selectLeader(proposedValues map[string]string) string {
 	}
 
 	return value
+}
+
+func PrettyPrint(v interface{}) string {
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err == nil {
+			return string(b)
+	}
+	return ""
 }
