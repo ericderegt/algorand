@@ -33,10 +33,12 @@ type ServerState struct {
 
 type PeriodState struct {
 	proposedValues	map[string]string
-	nextVotes	map[string]int64
-	softVotes	map[string]int64
-	certVotes	map[string]int64
-	period		int64
+	nextVotes		map[string]int64
+	softVotes		map[string]int64
+	certVotes		map[string]int64
+	myCertVote  	string
+	startingValue	string
+	period			int64
 }
 
 type AppendBlockInput struct {
@@ -140,16 +142,30 @@ func restartTimer(timer *time.Timer, ms int64) {
 	timer.Reset(time.Duration(ms) * time.Millisecond)
 }
 
-func initPeriodState(p int64) PeriodState {
+func initPeriodState(p int64, v string) PeriodState {
+	startingValue := "_|_"
+	if p > 1 {
+		startingValue = v
+	}
 	newPeriodState := PeriodState{
 		proposedValues: make(map[string]string),
 		nextVotes: make(map[string]int64),
 		softVotes: make(map[string]int64),
 		certVotes: make(map[string]int64),
+		myCertVote: "",
+		startingValue: startingValue,
 		period: p,
 	}
 
 	return newPeriodState
+}
+
+func handleHalt() {
+	// swap period states
+
+	// append block to chain
+
+	// prepare for new round
 }
 
 // The main service loop.
@@ -250,9 +266,19 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	// generate candidates using every user's stake which will be used for sortition
 	candidates := generateCandidatesByStake(userIds, idToStake)
 
+
+	//////////////////////////////////////////////////////////////////////
+	// TODO: Figure out if we really need to do this once before loop start
+	//////////////////////////////////////////////////////////////////////
+
+	// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
+	state.proposedBlock = state.tempBlock
+
+	v := calculateHash(&state.proposedBlock)
+
 	state.period = int64(1)
 	state.step = int64(1)
-	state.periodState = initPeriodState(state.period)
+	state.periodState = initPeriodState(state.period, v)
 
 	// create a variable to handle very first round or propose block
 	firstRound := true
@@ -265,6 +291,11 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			if state.lastCompletedRound == state.round || firstRound {
 				log.Printf("Starting next round")
 
+				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
+				state.proposedBlock = state.tempBlock
+
+				v := calculateHash(&state.proposedBlock)
+
 				// only move to next round and reset period and periodstate if not the first round
 				if !firstRound {
 					state.round++
@@ -275,17 +306,12 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 					// initialize periodState and move p-1 state to lastPeriodState
 					state.lastPeriodState = state.periodState
-					state.periodState = initPeriodState(state.period)
+					state.periodState = initPeriodState(state.period, v)
 				}
 				firstRound = false
 
 				// each server needs exact same seed per round so they all see the same selection
 				_, _, votes := sortition(state.privateKey, state.round, "proposer", userId, candidates, k)
-
-				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
-				state.proposedBlock = state.tempBlock
-
-				v := calculateHash(&state.proposedBlock)
 
 				sigParams := []string{state.seed, strconv.FormatInt(state.period, 10)}
 
@@ -344,6 +370,10 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				log.Printf("cert vote is %v", certVoteV)
 
 				if certVoteV != "" {
+					// add my own vote for this value
+					state.periodState.certVotes[certVoteV]++
+					state.periodState.myCertVote = certVoteV;
+
 					message := []string{certVoteV, "cert", strconv.FormatInt(state.period, 10)}
 					certVoteSIG := SIG(userId, message)
 
@@ -354,14 +384,39 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
 						}(c, p, certVoteSIG)
 					}
+
+					// check if our own vote helped us reach requiredVotes
+					haltValue := checkHaltingCondition(&state.periodState, requiredVotes)
+					if haltValue != "" {
+						log.Printf("AGREEMENT! New Block Value: %v", haltValue)
+
+						// TODO: Figure out to handle halting condition...
+					}
 				}
 			} else if state.step == 4 {
-				runStep4(&state.periodState, &state.lastPeriodState, requiredVotes)
+				log.Printf("STEP 4")
+				nextVoteV := runStep4(&state.periodState, &state.lastPeriodState, requiredVotes)
+				log.Printf("next vote is %v", nextVoteV)
+
+				// add my own vote for this value
+				state.periodState.nextVotes[nextVoteV]++
+
+				message := []string{nextVoteV, "next", strconv.FormatInt(state.period, 10)}
+				nextVoteSIG := SIG(userId, message)
+
+				for p, c := range peerClients {
+					go func(c pb.AlgorandClient, p string, nextVoteSIG *pb.SIGRet) {
+						log.Printf("Sent next vote to peer %v", p)
+						ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: nextVoteSIG})
+						voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
+					}(c, p, nextVoteSIG)
+				}
 			} else if state.step == 5 {
+				log.Printf("STEP 5")
 				runStep5(&state.periodState, &state.lastPeriodState, requiredVotes)
 			}
 
-			restartTimer(agreementTimer, 20000)
+			restartTimer(agreementTimer, 10000)
 
 		case op := <-bcs.C:
 			// Received a command from client
@@ -460,24 +515,32 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			log.Printf("ProposeBlockResponse from: %v", pbr.peer)
 
 		case vc := <-algorand.VoteChan:
-			log.Printf("Received vote from: %v", vc.arg.Message.UserId)
-
 			voteValue := vc.arg.Message.Message[0]
 			voteType := vc.arg.Message.Message[1]
 			votePeriod, _ := strconv.ParseInt(vc.arg.Message.Message[2], 10, 64)
+			log.Printf("Received %vVote from: %v", voteType, vc.arg.Message.UserId)
 
-			log.Printf("VoteType: %v", voteType)
 			if voteType == "soft" {
 				if votePeriod == state.periodState.period {
 					state.periodState.softVotes[voteValue]++
 				} else if votePeriod == state.lastPeriodState.period {
 					state.lastPeriodState.softVotes[voteValue]++
 				}
+				vc.response <- pb.VoteRet{Success: true}
 			} else if voteType == "cert" {
 				if votePeriod == state.periodState.period {
 					state.periodState.certVotes[voteValue]++
 				} else if votePeriod == state.lastPeriodState.period {
 					state.lastPeriodState.certVotes[voteValue]++
+				}
+				vc.response <- pb.VoteRet{Success: true}
+
+				// we need to check for halting condition anytime we see a new cert vote
+				haltValue := checkHaltingCondition(&state.periodState, requiredVotes)
+				if haltValue != "" {
+					log.Printf("AGREEMENT! New Block Value: %v", haltValue)
+
+					// TODO: Figure out to handle halting condition...
 				}
 			} else if voteType == "next" {
 				if votePeriod == state.periodState.period {
@@ -485,12 +548,13 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				} else if votePeriod == state.lastPeriodState.period {
 					state.lastPeriodState.nextVotes[voteValue]++
 				}
+				vc.response <- pb.VoteRet{Success: true}
+			} else {
+				log.Printf("Strange to arrive here")
+				vc.response <- pb.VoteRet{Success: false}
 			}
-
-
 		case vr := <-voteResponseChan:
 			log.Printf("VoteResponse: %#v", vr)
-
 		}
 	}
 	log.Printf("Strange to arrive here")
