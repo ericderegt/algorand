@@ -149,12 +149,12 @@ func initPeriodState(p int64, v string) PeriodState {
 	}
 	newPeriodState := PeriodState{
 		proposedValues: make(map[string]string),
-		nextVotes: make(map[string]int64),
-		softVotes: make(map[string]int64),
-		certVotes: make(map[string]int64),
-		myCertVote: "",
-		startingValue: startingValue,
-		period: p,
+		nextVotes: 		make(map[string]int64),
+		softVotes: 		make(map[string]int64),
+		certVotes: 		make(map[string]int64),
+		myCertVote: 	"",
+		startingValue: 	startingValue,
+		period: 		p,
 	}
 
 	return newPeriodState
@@ -166,6 +166,10 @@ func handleHalt() {
 	// append block to chain
 
 	// prepare for new round
+}
+
+func handleStep5() {
+	
 }
 
 // The main service loop.
@@ -413,10 +417,33 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				}
 			} else if state.step == 5 {
 				log.Printf("STEP 5")
-				runStep5(&state.periodState, &state.lastPeriodState, requiredVotes)
+				nextVoteV := runStep5(&state.periodState, &state.lastPeriodState, requiredVotes)
+				log.Printf("next vote is %v", nextVoteV)
+
+				if nextVoteV != "" {
+					// add my own vote for this value
+					state.periodState.nextVotes[nextVoteV]++
+
+					message := []string{nextVoteV, "next", strconv.FormatInt(state.period, 10)}
+					nextVoteSIG := SIG(userId, message)
+
+					for p, c := range peerClients {
+						go func(c pb.AlgorandClient, p string, nextVoteSIG *pb.SIGRet) {
+							log.Printf("Sent next vote to peer %v", p)
+							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: nextVoteSIG})
+							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
+						}(c, p, nextVoteSIG)
+					}
+				}
 			}
 
-			restartTimer(agreementTimer, 10000)
+			// Handle resetting the agreementTimer
+			// we want a shorter timout for continously checking step5 again and again
+			if state.step == 5 {
+				restartTimer(agreementTimer, 2000)
+			} else {
+				restartTimer(agreementTimer, 10000)
+			}
 
 		case op := <-bcs.C:
 			// Received a command from client
@@ -554,7 +581,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				vc.response <- pb.VoteRet{Success: false}
 			}
 		case vr := <-voteResponseChan:
-			log.Printf("VoteResponse: %#v", vr)
+			log.Printf("VoteResponse from: %v", vr.peer)
 		}
 	}
 	log.Printf("Strange to arrive here")

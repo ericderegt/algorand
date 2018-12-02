@@ -80,6 +80,39 @@ func runStep4(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
 }
 
 func runStep5(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes int64) string {
+  // if i sees 2t + 1 soft-votes for some value v 6= ⊥ for period p, then i next-votes v.
+  var voteValue string
+  votes := int64(0)
+
+  for value, numVotes := range currentPeriod.softVotes {
+    // find max value
+    if numVotes > votes {
+      voteValue = value
+      votes = numVotes
+    }
+  }
+
+  if voteValue != "_|_" && votes > requiredVotes {
+    return voteValue
+  } 
+
+  // If p ≥ 2 AND i sees 2t+ 1 next-votes for ⊥ for period p−1 AND i has not certified in period p , then i next-votes _|_
+  if currentPeriod.period > 1 {
+    voteValue = ""
+    votes = int64(0)
+
+    for value, numVotes := range lastPeriod.nextVotes {
+      if numVotes > votes {
+        voteValue = value
+        votes = numVotes
+      }
+    }
+
+    if voteValue == "_|_" && votes > requiredVotes && currentPeriod.myCertVote == "" {
+      return "_|_"
+    }
+  }
+
   return ""
 }
 
