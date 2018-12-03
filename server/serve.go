@@ -470,9 +470,9 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					}(c, p, transaction)
 				}
 
-			} else {
-				bcs.HandleCommand(op)
 			}
+
+			bcs.HandleCommand(op)
 
 			// Check if add new Transaction, or simply get the curent Blockchain
 			// if op.command.Operation == pb.Op_GET {
