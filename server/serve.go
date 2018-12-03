@@ -33,6 +33,7 @@ type ServerState struct {
 
 type PeriodState struct {
 	proposedValues	map[string]string
+	valueToBlock	map[string]*pb.Block
 	nextVotes		map[string]int64
 	softVotes		map[string]int64
 	certVotes		map[string]int64
@@ -145,6 +146,7 @@ func restartTimer(timer *time.Timer, ms int64) {
 func initPeriodState(p int64) PeriodState {
 	newPeriodState := PeriodState{
 		proposedValues: make(map[string]string),
+		valueToBlock:   make(map[string]*pb.Block),
 		nextVotes: 		make(map[string]int64),
 		softVotes: 		make(map[string]int64),
 		certVotes: 		make(map[string]int64),
@@ -156,16 +158,20 @@ func initPeriodState(p int64) PeriodState {
 	return newPeriodState
 }
 
-func handleHalt(chain []string, newV string) {
-	// swap period states
+func handleHalt(bcs *BCStore, state *ServerState, newBlock *pb.Block) {
+	log.Printf("AGREEMENT!")
+	bcs.blockchain = append(bcs.blockchain, newBlock)
+	log.Printf("Chain: %v", PrettyPrint(bcs.blockchain))
 
-	// append block to chain
+	// Handle Halting Condition
+	state.readyForNextRound = true
+	state.round++
 
-	// prepare for new round
-}
-
-func handleStep5() {
-	
+	state.lastPeriodState = PeriodState{}
+	state.period = int64(1)
+	state.step = int64(1)
+	state.periodState = initPeriodState(state.period)
+	state.periodState.startingValue = "_|_"
 }
 
 // The main service loop.
@@ -273,9 +279,6 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	state.periodState = initPeriodState(state.period)
 	state.periodState.startingValue = "_|_"
 
-	// TODO: Delete this after appending blocks to actual bockchain
-	localChain := []string{}
-
 	// Run forever handling inputs from various channels
 	for {
 		select{
@@ -287,6 +290,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
 				state.proposedBlock = prepareBlock(&state.tempBlock, bcs.blockchain)
+				b := &state.proposedBlock
 				v := calculateHash(&state.proposedBlock)
 
 				// each server needs exact same seed per round so they all see the same selection
@@ -298,13 +302,19 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 				// Value proposal step
 				for votes > 0 {
+					// add your own proposal to proposedBlock map
+					proposerCredential := []string{userId, sig.SignedMessage}
+					proposerHash := signMessage(proposerCredential)
+					state.periodState.proposedValues[proposerHash] = v
+					state.periodState.valueToBlock[v] = b
+
 					// broadcast proposal
 					for p, c := range peerClients {
-						go func(c pb.AlgorandClient, p string, v string, sig *pb.SIGRet) {
+						go func(c pb.AlgorandClient, p string, b *pb.Block, v string, sig *pb.SIGRet) {
 							log.Printf("Sent proposal to peer %v", p)
-							ret, err := c.ProposeBlock(context.Background(), &pb.ProposeBlockArgs{Block: v, Credential: sig})
+							ret, err := c.ProposeBlock(context.Background(), &pb.ProposeBlockArgs{Block: b, Credential: sig, Value: v})
 							proposeBlockResponseChan <- ProposeBlockResponse{ret: ret, err: err, peer: p}
-						}(c, p, v, sig)
+						}(c, p, b, v, sig)
 					}
 					votes--
 				}
@@ -363,19 +373,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					// check if our own vote helped us reach requiredVotes
 					haltValue := checkHaltingCondition(&state.periodState, requiredVotes)
 					if haltValue != "" {
-						log.Printf("AGREEMENT!")
-						localChain = append(localChain, haltValue)
-						log.Printf("Chain: %v", PrettyPrint(localChain))
-
-						// Handle Halting Condition
-						state.readyForNextRound = true
-						state.round++
-
-						state.lastPeriodState = PeriodState{}
-						state.period = int64(1)
-						state.step = int64(1)
-						state.periodState = initPeriodState(state.period)
-						state.periodState.startingValue = "_|_"
+						handleHalt(bcs, &state, state.periodState.valueToBlock[haltValue])
 					}
 				}
 			} else if state.step == 4 {
@@ -519,7 +517,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 				proposerHash := signMessage(proposerCredential)
 				// add verified block to list of blocks I've seen this period
-				state.periodState.proposedValues[proposerHash] = pbc.arg.Block
+				state.periodState.proposedValues[proposerHash] = pbc.arg.Value
+				state.periodState.valueToBlock[pbc.arg.Value] = pbc.arg.Block
 				pbc.response <- pb.ProposeBlockRet{Success: true}
 			} else {
 				// rejected proposed block
@@ -553,19 +552,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				// we need to check for halting condition anytime we see a new cert vote
 				haltValue := checkHaltingCondition(&state.periodState, requiredVotes)
 				if haltValue != "" {
-					log.Printf("AGREEMENT!")
-					localChain = append(localChain, haltValue)
-					log.Printf("Chain: %v", PrettyPrint(localChain))
-
-					// Handle Halting Condition
-					state.readyForNextRound = true
-					state.round++
-					
-					state.lastPeriodState = PeriodState{}
-					state.period = int64(1)
-					state.step = int64(1)
-					state.periodState = initPeriodState(state.period)
-					state.periodState.startingValue = "_|_"
+					handleHalt(bcs, &state, state.periodState.valueToBlock[haltValue])
 				}
 			} else if voteType == "next" {
 				if votePeriod == state.periodState.period {

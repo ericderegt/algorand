@@ -50,7 +50,8 @@ message AppendTransactionRet {
 
 message ProposeBlockArgs {
     SIGRet credential = 1;
-    string block = 2;
+    Block block = 2;
+    string value = 3;
 }
 
 message ProposeBlockRet {
