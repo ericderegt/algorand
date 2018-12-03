@@ -50,19 +50,25 @@ func generateBlock(oldBlock *pb.Block, tx *pb.Transaction) *pb.Block {
 	return newBlock
 }
 
-func prepareBlock(block *pb.Block, blockchain []*pb.Block) pb.Block {
+func prepareBlock(block *pb.Block, blockchain []*pb.Block) *pb.Block {
+	newBlock := new(pb.Block)
+
 	if len(blockchain) > 0 {
 		lastBlock := blockchain[len(blockchain)-1]
-		block.Id = lastBlock.Id + 1
-		block.PrevHash = lastBlock.Hash
+		newBlock.Id = lastBlock.Id + 1
+		newBlock.PrevHash = lastBlock.Hash
 	} else {
-		block.Id = 1
-		block.PrevHash = ""
+		newBlock.Id = 1
+		newBlock.PrevHash = ""
 	}
-	block.Timestamp = time.Now().String()
-	block.Hash = calculateHash(block)
 
-	return *block
+	//copy Transactions over to new Block
+	copy(newBlock.Tx, block.Tx)
+
+	newBlock.Timestamp = time.Now().String()
+	newBlock.Hash = calculateHash(newBlock)
+
+	return newBlock
 }
 
 func makeRange(min, max int64) []int64 {

@@ -22,8 +22,8 @@ type ServerState struct {
 	publicKey 	 		int64
 	round		 		int64
 	readyForNextRound 	bool
-	tempBlock	 		pb.Block
-	proposedBlock 		pb.Block
+	tempBlock	 		*pb.Block
+	proposedBlock 		*pb.Block
 	seed 				string
 	periodState			PeriodState
 	lastPeriodState		PeriodState
@@ -193,6 +193,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		readyForNextRound: true,
 		seed: "thisshouldbeahash", // R in the paper
 	}
+	state.tempBlock = new(pb.Block)
 
 	peerClients := make(map[string]pb.AlgorandClient)
 	peerCount := int64(0)
@@ -289,9 +290,9 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				state.readyForNextRound = false
 
 				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
-				state.proposedBlock = prepareBlock(&state.tempBlock, bcs.blockchain)
-				b := &state.proposedBlock
-				v := calculateHash(&state.proposedBlock)
+				state.proposedBlock = prepareBlock(state.tempBlock, bcs.blockchain)
+				b := state.proposedBlock
+				v := calculateHash(state.proposedBlock)
 
 				// each server needs exact same seed per round so they all see the same selection
 				_, _, votes := sortition(state.privateKey, state.round, "proposer", userId, candidates, k)
@@ -419,7 +420,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					state.step = 1
 					state.lastPeriodState = state.periodState
 					state.periodState = initPeriodState(state.period)
-					state.periodState.startingValue = calculateHash(&state.proposedBlock)
+					state.periodState.startingValue = calculateHash(state.proposedBlock)
 				}
 			}
 
