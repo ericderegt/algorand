@@ -52,18 +52,16 @@ func generateBlock(oldBlock *pb.Block, tx *pb.Transaction) *pb.Block {
 
 func prepareBlock(block *pb.Block, blockchain []*pb.Block) *pb.Block {
 	newBlock := new(pb.Block)
+	lastBlock := blockchain[len(blockchain)-1]
 
-	if len(blockchain) > 0 {
-		lastBlock := blockchain[len(blockchain)-1]
-		newBlock.Id = lastBlock.Id + 1
-		newBlock.PrevHash = lastBlock.Hash
-	} else {
-		newBlock.Id = 1
-		newBlock.PrevHash = ""
-	}
+	newBlock.Id = lastBlock.Id + 1
+	newBlock.PrevHash = lastBlock.Hash
 
 	//copy Transactions over to new Block
 	copy(newBlock.Tx, block.Tx)
+
+	// loop through lastBlock's transactions and remove any that appear in newBlock
+	// TODO:
 
 	newBlock.Timestamp = time.Now().String()
 	newBlock.Hash = calculateHash(newBlock)
