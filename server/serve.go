@@ -174,11 +174,6 @@ func handleHalt(bcs *BCStore, state *ServerState, newBlock *pb.Block) {
     log.Printf("AGREEMENT!")
     bcs.blockchain = append(bcs.blockchain, newBlock)
     log.Printf("Chain: %v", PrettyPrint(bcs.blockchain))
-    for _,b := range bcs.blockchain {
-        for i,t := range b.Tx {
-            log.Printf("Transaction[%v]: %#v", i, t)
-        }
-    }
 
     // Handle Halting Condition
     state.readyForNextRound = true

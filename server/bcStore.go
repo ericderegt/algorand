@@ -51,8 +51,6 @@ func (bcs *BCStore) GetResponse(arg *pb.Empty) pb.Result {
 }
 
 func (bcs *BCStore) SendResponse(arg *pb.Transaction) pb.Result {
-	// newBlock := generateBlock(bcs.blockchain[len(bcs.blockchain)-1], arg)
-	// bcs.blockchain = append(bcs.blockchain, newBlock)
 	return pb.Result{Result: &pb.Result_Bc{Bc: &pb.Blockchain{Blocks: bcs.blockchain}}}
 }
 
