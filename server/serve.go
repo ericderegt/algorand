@@ -68,11 +68,17 @@ type VoteInput struct {
 	response chan pb.VoteRet
 }
 
+type RequestBlockChainInput struct {
+	arg *pb.RequestBlockChainArgs
+	response chan pb.RequestBlockChainRet
+}
+
 type Algorand struct {
 	AppendBlockChan chan AppendBlockInput
 	AppendTransactionChan chan AppendTransactionInput
 	ProposeBlockChan chan ProposeBlockInput
 	VoteChan chan VoteInput
+	RequestBlockChainChan chan RequestBlockChainInput
 }
 
 func (a *Algorand) AppendBlock(ctx context.Context, arg *pb.AppendBlockArgs) (*pb.AppendBlockRet, error) {
@@ -99,6 +105,13 @@ func (a *Algorand) Vote(ctx context.Context, arg *pb.VoteArgs) (*pb.VoteRet, err
 func (a *Algorand) ProposeBlock(ctx context.Context, arg *pb.ProposeBlockArgs) (*pb.ProposeBlockRet, error) {
 	c := make(chan pb.ProposeBlockRet)
 	a.ProposeBlockChan <- ProposeBlockInput{arg: arg, response: c}
+	result := <-c
+	return &result, nil
+}
+
+func (a *Algorand) RequestBlockChain(ctx context.Context, arg *pb.RequestBlockChainArgs) (*pb.RequestBlockChainRet, error) {
+	c := make(chan pb.RequestBlockChainRet)
+	a.RequestBlockChainChan <- RequestBlockChainInput{arg: arg, response: c}
 	result := <-c
 	return &result, nil
 }
@@ -189,11 +202,14 @@ func handleHalt(bcs *BCStore, state *ServerState, newBlock *pb.Block) {
 // The main service loop.
 func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
+	log.Printf("peers: %#v", peers)
+
 	algorand := Algorand{
 		AppendBlockChan: make(chan AppendBlockInput),
 		AppendTransactionChan: make(chan AppendTransactionInput),
 		ProposeBlockChan: make(chan ProposeBlockInput),
 		VoteChan: make(chan VoteInput),
+		RequestBlockChainChan: make(chan RequestBlockChainInput),
 	}
 	// Start in a Go routine so it doesn't affect us.
 	go RunAlgorandServer(&algorand, port)
@@ -267,10 +283,17 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		peer string
 	}
 
+	type RequestBlockChainResponse struct {
+		ret *pb.RequestBlockChainRet
+		err error
+		peer string
+	}
+
 	appendBlockResponseChan := make(chan AppendBlockResponse)
 	appendTransactionResponseChan := make(chan AppendTransactionResponse)
 	proposeBlockResponseChan := make(chan ProposeBlockResponse)
 	voteResponseChan := make(chan VoteResponse)
+	requestBlockChainResponseChan := make(chan RequestBlockChainResponse)
 
 	// Set timer to check for new rounds
 	roundTimer := time.NewTimer(5000 * time.Millisecond)
@@ -323,11 +346,11 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 					// broadcast proposal
 					for p, c := range peerClients {
-						go func(c pb.AlgorandClient, p string, b *pb.Block, v string, sig *pb.SIGRet) {
+						go func(c pb.AlgorandClient, p string, b *pb.Block, v string, sig *pb.SIGRet, round int64) {
 							log.Printf("Sent proposal to peer %v", p)
-							ret, err := c.ProposeBlock(context.Background(), &pb.ProposeBlockArgs{Block: b, Credential: sig, Value: v})
+							ret, err := c.ProposeBlock(context.Background(), &pb.ProposeBlockArgs{Block: b, Credential: sig, Value: v, Round: round, Peer: userId})
 							proposeBlockResponseChan <- ProposeBlockResponse{ret: ret, err: err, peer: p}
-						}(c, p, b, v, sig)
+						}(c, p, b, v, sig, state.round)
 					}
 					votes--
 				}
@@ -355,11 +378,11 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					softVoteSIG := SIG(userId, message)
 
 					for p, c := range peerClients {
-						go func(c pb.AlgorandClient, p string, softVoteSIG *pb.SIGRet) {
+						go func(c pb.AlgorandClient, p string, softVoteSIG *pb.SIGRet, round int64) {
 							log.Printf("Sent soft vote to peer %v", p)
-							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: softVoteSIG})
+							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: softVoteSIG, Round: round, Peer: userId})
 							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
-						}(c, p, softVoteSIG)
+						}(c, p, softVoteSIG, state.round)
 					}
 				}
 			} else if state.step == 3 {
@@ -376,11 +399,11 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					certVoteSIG := SIG(userId, message)
 
 					for p, c := range peerClients {
-						go func(c pb.AlgorandClient, p string, certVoteSIG *pb.SIGRet) {
+						go func(c pb.AlgorandClient, p string, certVoteSIG *pb.SIGRet, round int64) {
 							log.Printf("Sent cert vote to peer %v", p)
-							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: certVoteSIG})
+							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: certVoteSIG, Round: round, Peer: userId})
 							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
-						}(c, p, certVoteSIG)
+						}(c, p, certVoteSIG, state.round)
 					}
 
 					// check if our own vote helped us reach requiredVotes
@@ -401,11 +424,11 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				nextVoteSIG := SIG(userId, message)
 
 				for p, c := range peerClients {
-					go func(c pb.AlgorandClient, p string, nextVoteSIG *pb.SIGRet) {
+					go func(c pb.AlgorandClient, p string, nextVoteSIG *pb.SIGRet, round int64) {
 						log.Printf("Sent next vote to peer %v", p)
-						ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: nextVoteSIG})
+						ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: nextVoteSIG, Round: round, Peer: userId})
 						voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
-					}(c, p, nextVoteSIG)
+					}(c, p, nextVoteSIG, state.round)
 				}
 			} else if state.step == 5 {
 				log.Printf("STEP 5")
@@ -420,11 +443,11 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					nextVoteSIG := SIG(userId, message)
 
 					for p, c := range peerClients {
-						go func(c pb.AlgorandClient, p string, nextVoteSIG *pb.SIGRet) {
+						go func(c pb.AlgorandClient, p string, nextVoteSIG *pb.SIGRet, round int64) {
 							log.Printf("Sent next vote to peer %v", p)
-							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: nextVoteSIG})
+							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: nextVoteSIG, Round: round, Peer: userId})
 							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
-						}(c, p, nextVoteSIG)
+						}(c, p, nextVoteSIG, state.round)
 					}
 
 					// finish period
@@ -519,6 +542,17 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			log.Printf("AppendTransactionResponse: %#v", atr)
 
 		case pbc := <-algorand.ProposeBlockChan:
+			if pbc.arg.Round > state.round {
+				log.Printf("Round is behind peers, request blockchains")
+				for p, c := range peerClients {
+					go func(c pb.AlgorandClient, p string) {
+						ret, err := c.RequestBlockChain(context.Background(), &pb.RequestBlockChainArgs{Peer: p})
+						requestBlockChainResponseChan <- RequestBlockChainResponse{ret: ret, err: err, peer: p}
+					}(c, p)
+				}
+				break
+			}
+			
 			proposerId := pbc.arg.Credential.UserId
 			log.Printf("ProposeBlock from %v", proposerId)
 
@@ -543,6 +577,17 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			log.Printf("ProposeBlockResponse from: %v", pbr.peer)
 
 		case vc := <-algorand.VoteChan:
+			if vc.arg.Round > state.round {
+				log.Printf("Round is behind peers, request blockchains")
+				for p, c := range peerClients {
+					go func(c pb.AlgorandClient, p string) {
+						ret, err := c.RequestBlockChain(context.Background(), &pb.RequestBlockChainArgs{Peer: p})
+						requestBlockChainResponseChan <- RequestBlockChainResponse{ret: ret, err: err, peer: p}
+					}(c, p)
+				}
+				break
+			}
+
 			voterId := vc.arg.Message.UserId
 			voteValue := vc.arg.Message.Message[0]
 			voteType := vc.arg.Message.Message[1]
@@ -603,6 +648,25 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			}
 		case vr := <-voteResponseChan:
 			log.Printf("VoteResponse from: %v", vr.peer)
+
+		case bcc := <-algorand.RequestBlockChainChan:
+			log.Printf("RequestBlockChain from: %v", bcc.arg.Peer)
+
+			bcc.response <- pb.RequestBlockChainRet{Peer: userId, Blockchain: bcs.blockchain}
+
+		case bcr := <-requestBlockChainResponseChan:
+			candidateBlockchain := bcr.ret.Blockchain
+
+			if len(candidateBlockchain) > len(bcs.blockchain) {
+				// verify every block in this blockchain
+				verified := false
+
+
+				if verified {
+					log.Printf("Verified new Blockchain from peer: %v", bcr.ret.Peer)
+					bcs.blockchain = candidateBlockchain
+				}
+			}
 		}
 	}
 	log.Printf("Strange to arrive here")

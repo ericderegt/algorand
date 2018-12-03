@@ -52,6 +52,8 @@ message ProposeBlockArgs {
     SIGRet credential = 1;
     Block block = 2;
     string value = 3;
+    int64 round = 4;
+    string peer = 5;
 }
 
 message ProposeBlockRet {
@@ -60,6 +62,8 @@ message ProposeBlockRet {
 
 message VoteArgs {
     SIGRet message = 1;
+    int64 round = 2;
+    string peer = 3;
 }
 
 message VoteRet {
@@ -72,12 +76,22 @@ message SIGRet {
     string signedMessage = 3;
 }
 
+message RequestBlockChainArgs {
+    string peer = 1;
+}
+
+message RequestBlockChainRet {
+    string peer = 1;
+    repeated Block blockchain = 2; 
+}
+
 // Algorand service
 service Algorand {
     rpc AppendBlock(AppendBlockArgs) returns (AppendBlockRet) {}
     rpc AppendTransaction(AppendTransactionArgs) returns (AppendTransactionRet) {}
     rpc ProposeBlock(ProposeBlockArgs) returns (ProposeBlockRet) {}
     rpc Vote(VoteArgs) returns (VoteRet) {}
+    rpc RequestBlockChain(RequestBlockChainArgs) returns (RequestBlockChainRet) {}
 }
 
 message Blockchain {
