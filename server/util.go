@@ -58,7 +58,11 @@ func prepareBlock(block *pb.Block, blockchain []*pb.Block) *pb.Block {
 	newBlock.PrevHash = lastBlock.Hash
 
 	//copy Transactions over to new Block
-	copy(newBlock.Tx, block.Tx)
+	newBlock.Tx = []*pb.Transaction{}
+
+	for _, tx := range block.Tx {
+		newBlock.Tx = append(newBlock.Tx, tx)
+	}
 
 	blockMap := make(map[string]bool)
 	// loop through lastBlock's transactions and remove any that appear in newBlock

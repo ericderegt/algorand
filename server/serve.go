@@ -171,19 +171,24 @@ func initPeriodState(p int64) PeriodState {
 }
 
 func handleHalt(bcs *BCStore, state *ServerState, newBlock *pb.Block) {
-	log.Printf("AGREEMENT!")
-	bcs.blockchain = append(bcs.blockchain, newBlock)
-	log.Printf("Chain: %v", PrettyPrint(bcs.blockchain))
+    log.Printf("AGREEMENT!")
+    bcs.blockchain = append(bcs.blockchain, newBlock)
+    log.Printf("Chain: %v", PrettyPrint(bcs.blockchain))
+    for _,b := range bcs.blockchain {
+        for i,t := range b.Tx {
+            log.Printf("Transaction[%v]: %#v", i, t)
+        }
+    }
 
-	// Handle Halting Condition
-	state.readyForNextRound = true
-	state.round++
+    // Handle Halting Condition
+    state.readyForNextRound = true
+    state.round++
 
-	state.lastPeriodState = PeriodState{}
-	state.period = int64(1)
-	state.step = int64(1)
-	state.periodState = initPeriodState(state.period)
-	state.periodState.startingValue = "_|_"
+    state.lastPeriodState = PeriodState{}
+    state.period = int64(1)
+    state.step = int64(1)
+    state.periodState = initPeriodState(state.period)
+    state.periodState.startingValue = "_|_"
 }
 
 // The main service loop.
@@ -296,7 +301,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	for {
 		select{
 		case <-roundTimer.C:
-			// propose block if last round complete or very first round 
+			// propose block if last round complete or very first round
 			if state.readyForNextRound {
 				log.Printf("Starting round %v", state.round)
 				state.readyForNextRound = false
