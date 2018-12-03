@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"encoding/json"
+	"time"
 
 	context "golang.org/x/net/context"
 	"google.golang.org/grpc"
@@ -40,12 +41,22 @@ func main() {
 	// Create Algorand client
 	bcc := pb.NewBCStoreClient(conn)
 
-	// Send Transaction
+	// Send Transactions
 	transReq := &pb.Transaction{V: "Eric and Nick are good at blockchain"}
+
 	res, err := bcc.Send(context.Background(), transReq)
 	if err != nil {
 		log.Fatalf("Send error")
 	}
+
+	msg := fmt.Sprintf("Eric and Nick are ok at blockchain - %v", time.Now().String())
+	transReq = &pb.Transaction{V: msg}
+
+	res, err = bcc.Send(context.Background(), transReq)
+	if err != nil {
+		log.Fatalf("Send error")
+	}
+
 	bytes, err := json.MarshalIndent(res.GetBc(), "", "    ")
 	if err != nil {
 		log.Println(err)
