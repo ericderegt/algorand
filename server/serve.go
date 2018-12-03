@@ -25,8 +25,7 @@ type ServerState struct {
 	tempBlock	 		*pb.Block
 	proposedBlock 		*pb.Block
 	seed 				string
-	periodState			PeriodState
-	lastPeriodState		PeriodState
+	periodStates		map[int64]*PeriodState
 	period int64
 	step int64
 }
@@ -46,6 +45,7 @@ type PeriodState struct {
 	myCertVote  	string
 	startingValue	string
 	period			int64
+	round			int64
 }
 
 type AppendBlockInput struct {
@@ -162,7 +162,7 @@ func restartTimer(timer *time.Timer, ms int64) {
 	timer.Reset(time.Duration(ms) * time.Millisecond)
 }
 
-func initPeriodState(p int64) PeriodState {
+func initPeriodState(p int64) *PeriodState {
 	newPeriodState := PeriodState{
 		proposedValues: make(map[string]string),
 		valueToBlock:   make(map[string]*pb.Block),
@@ -180,7 +180,7 @@ func initPeriodState(p int64) PeriodState {
 		period: 		p,
 	}
 
-	return newPeriodState
+	return &newPeriodState
 }
 
 func handleHalt(bcs *BCStore, state *ServerState, newBlock *pb.Block) {
@@ -192,11 +192,11 @@ func handleHalt(bcs *BCStore, state *ServerState, newBlock *pb.Block) {
     state.readyForNextRound = true
     state.round++
 
-    state.lastPeriodState = PeriodState{}
     state.period = int64(1)
-    state.step = int64(1)
-    state.periodState = initPeriodState(state.period)
-    state.periodState.startingValue = "_|_"
+	state.step = int64(1)
+	state.periodStates = map[int64]*PeriodState{}
+    state.periodStates[state.period] = initPeriodState(state.period)
+    state.periodStates[state.period].startingValue = "_|_"
 }
 
 // The main service loop.
@@ -312,8 +312,9 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 	//Prepare periodState
 	state.period = int64(1)
 	state.step = int64(1)
-	state.periodState = initPeriodState(state.period)
-	state.periodState.startingValue = "_|_"
+	state.periodStates = map[int64]*PeriodState{}
+	state.periodStates[state.period] = initPeriodState(state.period)
+	state.periodStates[state.period].startingValue = "_|_"
 
 	// Run forever handling inputs from various channels
 	for {
@@ -344,8 +345,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					// add your own proposal to proposedBlock map
 					proposerCredential := []string{userId, sig.SignedMessage}
 					proposerHash := signMessage(proposerCredential)
-					state.periodState.proposedValues[proposerHash] = v
-					state.periodState.valueToBlock[v] = b
+					state.periodStates[state.period].proposedValues[proposerHash] = v
+					state.periodStates[state.period].valueToBlock[v] = b
 
 					// broadcast proposal
 					for p, c := range peerClients {
@@ -369,12 +370,12 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 			if state.step == 2 {
 				log.Printf("STEP 2")
-				softVoteV := runStep2(&state.periodState, &state.lastPeriodState, requiredVotes)
+				softVoteV := runStep2(state.periodStates, requiredVotes, state.period)
 				log.Printf("soft vote is %v", softVoteV)
 
 				if softVoteV != "" {
 					// add my own vote for this value
-					state.periodState.softVotes[softVoteV]++
+					state.periodStates[state.period].softVotes[softVoteV]++
 
 					// broadcast my decision to vote for this value
 					message := []string{softVoteV, "soft", strconv.FormatInt(state.period, 10)}
@@ -390,13 +391,13 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				}
 			} else if state.step == 3 {
 				log.Printf("STEP 3")
-				certVoteV := runStep3(&state.periodState, requiredVotes)
+				certVoteV := runStep3(state.periodStates, requiredVotes, state.period)
 				log.Printf("cert vote is %v", certVoteV)
 
 				if certVoteV != "" {
 					// add my own vote for this value
-					state.periodState.certVotes[certVoteV]++
-					state.periodState.myCertVote = certVoteV;
+					state.periodStates[state.period].certVotes[certVoteV]++
+					state.periodStates[state.period].myCertVote = certVoteV;
 
 					message := []string{certVoteV, "cert", strconv.FormatInt(state.period, 10)}
 					certVoteSIG := SIG(userId, message)
@@ -410,18 +411,18 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					}
 
 					// check if our own vote helped us reach requiredVotes
-					haltValue := checkHaltingCondition(&state.periodState, requiredVotes)
+					haltValue := checkHaltingCondition(state.periodStates, requiredVotes)
 					if haltValue != "" {
-						handleHalt(bcs, &state, state.periodState.valueToBlock[haltValue])
+						handleHalt(bcs, &state, state.periodStates[state.period].valueToBlock[haltValue])
 					}
 				}
 			} else if state.step == 4 {
 				log.Printf("STEP 4")
-				nextVoteV := runStep4(&state.periodState, &state.lastPeriodState, requiredVotes)
+				nextVoteV := runStep4(state.periodStates, requiredVotes, state.period)
 				log.Printf("next vote is %v", nextVoteV)
 
 				// add my own vote for this value
-				state.periodState.nextVotes[nextVoteV]++
+				state.periodStates[state.period].nextVotes[nextVoteV]++
 
 				message := []string{nextVoteV, "next", strconv.FormatInt(state.period, 10)}
 				nextVoteSIG := SIG(userId, message)
@@ -435,12 +436,12 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				}
 			} else if state.step == 5 {
 				log.Printf("STEP 5")
-				nextVoteV := runStep5(&state.periodState, &state.lastPeriodState, requiredVotes)
+				nextVoteV := runStep5(state.periodStates, requiredVotes, state.period)
 				log.Printf("next vote is %v", nextVoteV)
 
 				if nextVoteV != "" {
 					// add my own vote for this value
-					state.periodState.nextVotes[nextVoteV]++
+					state.periodStates[state.period].nextVotes[nextVoteV]++
 
 					message := []string{nextVoteV, "next", strconv.FormatInt(state.period, 10)}
 					nextVoteSIG := SIG(userId, message)
@@ -456,9 +457,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					// finish period
 					state.period ++
 					state.step = 1
-					state.lastPeriodState = state.periodState
-					state.periodState = initPeriodState(state.period)
-					state.periodState.startingValue = calculateHash(state.proposedBlock)
+					state.periodStates[state.period] = initPeriodState(state.period)
+					state.periodStates[state.period].startingValue = calculateHash(state.proposedBlock)
 					
 					// allow step1 to happen again
 					state.readyForNextRound = true
@@ -571,8 +571,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 				proposerHash := signMessage(proposerCredential)
 				// add verified block to list of blocks I've seen this period
-				state.periodState.proposedValues[proposerHash] = pbc.arg.Value
-				state.periodState.valueToBlock[pbc.arg.Value] = pbc.arg.Block
+				state.periodStates[state.period].proposedValues[proposerHash] = pbc.arg.Value
+				state.periodStates[state.period].valueToBlock[pbc.arg.Value] = pbc.arg.Block
 				pbc.response <- pb.ProposeBlockRet{Success: true}
 			} else {
 				// rejected proposed block
@@ -595,8 +595,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				proposerHash := signMessage(proposerCredential)
 
 				// check if you proposed a block for this round and period
-				if v, ok := state.periodState.proposedValues[proposerHash]; ok {
-					b := state.periodState.valueToBlock[v]
+				if v, ok := state.periodStates[state.period].proposedValues[proposerHash]; ok {
+					b := state.periodStates[state.period].valueToBlock[v]
 
 					go func(c pb.AlgorandClient, p string, b *pb.Block, v string, sig *pb.SIGRet, round int64) {
 						ret, err := c.ProposeBlock(context.Background(), &pb.ProposeBlockArgs{Block: b, Credential: sig, Value: v, Round: round, Peer: userId})
@@ -625,59 +625,60 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			log.Printf("Received %vVote from: %v", voteType, voterId)
 
 			if voteType == "soft" {
-				_, hasVoted := state.periodState.haveSoftVoted[voterId]
+				_, hasVoted := state.periodStates[votePeriod].haveSoftVoted[voterId]
 				if !hasVoted {
-					if votePeriod == state.periodState.period {
-						state.periodState.softVotes[voteValue]++
-					} else if votePeriod == state.lastPeriodState.period {
-						state.lastPeriodState.softVotes[voteValue]++
-					}
-					state.periodState.haveSoftVoted[voterId] = true
+					state.periodStates[votePeriod].softVotes[voteValue]++
+					state.periodStates[votePeriod].haveSoftVoted[voterId] = true
 					vc.response <- pb.VoteRet{Success: true}
 				} else {
 					log.Printf("Ignoring %vVote from %v: already %vVoted this period", voteType, voterId, voteType)
-					vc.response <- pb.VoteRet{Success: false}
+					vc.response <- pb.VoteRet{Success: true}
 				}
 			} else if voteType == "cert" {
-				_, hasVoted := state.periodState.haveCertVoted[voterId]
+				_, hasVoted := state.periodStates[votePeriod].haveCertVoted[voterId]
 				if !hasVoted {
-					if votePeriod == state.periodState.period {
-						state.periodState.certVotes[voteValue]++
-					} else if votePeriod == state.lastPeriodState.period {
-						state.lastPeriodState.certVotes[voteValue]++
-					}
-					state.periodState.haveCertVoted[voterId] = true
+					state.periodStates[votePeriod].certVotes[voteValue]++
+					state.periodStates[votePeriod].haveCertVoted[voterId] = true
 					vc.response <- pb.VoteRet{Success: true}
 
 					// we need to check for halting condition anytime we see a new cert vote
-					haltValue := checkHaltingCondition(&state.periodState, requiredVotes)
+					haltValue := checkHaltingCondition(state.periodStates, requiredVotes)
 					if haltValue != "" {
-						handleHalt(bcs, &state, state.periodState.valueToBlock[haltValue])
+						handleHalt(bcs, &state, state.periodStates[state.period].valueToBlock[haltValue])
 					}
 				} else {
 					log.Printf("Ignoring %vVote from %v: already %vVoted this period", voteType, voterId, voteType)
-					vc.response <- pb.VoteRet{Success: false}
+					vc.response <- pb.VoteRet{Success: true}
 				}
 			} else if voteType == "next" {
-				_, hasVoted := state.periodState.haveNextVoted[voterId]
+				_, hasVoted := state.periodStates[votePeriod].haveNextVoted[voterId]
 				if !hasVoted {
-					if votePeriod == state.periodState.period {
-						state.periodState.nextVotes[voteValue]++
-					} else if votePeriod == state.lastPeriodState.period {
-						state.lastPeriodState.nextVotes[voteValue]++
-					}
-					state.periodState.haveNextVoted[voterId] = true
+					state.periodStates[votePeriod].nextVotes[voteValue]++
+					state.periodStates[votePeriod].haveNextVoted[voterId] = true
 					vc.response <- pb.VoteRet{Success: true}
 				} else {
 					log.Printf("Ignoring %vVote from %v: already %vVoted this period", voteType, voterId, voteType)
-					vc.response <- pb.VoteRet{Success: false}
+					vc.response <- pb.VoteRet{Success: true}
 				}
 			} else {
 				log.Printf("Strange to arrive here")
 				vc.response <- pb.VoteRet{Success: false}
 			}
 		case vr := <-voteResponseChan:
-			log.Printf("VoteResponse from: %v", vr.peer)
+			if vr.err != nil || !vr.ret.Success {
+				// retry
+				// p := vr.peer
+				// c := peerClients[p]
+
+				// voteType := vr.ret.Type
+				// round := vr.ret.Round
+				// period := vr.ret.Period
+				// peer := vr.ret.Peer
+
+				// if round == state.periodState.round {
+
+				// }
+			}
 
 		case bcc := <-algorand.RequestBlockChainChan:
 			log.Printf("RequestBlockChain from: %v", bcc.arg.Peer)
@@ -704,11 +705,11 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 						state.readyForNextRound = true
 						state.round = int64(len(bcs.blockchain))
 
-						state.lastPeriodState = PeriodState{}
 						state.period = int64(1)
 						state.step = int64(1)
-						state.periodState = initPeriodState(state.period)
-						state.periodState.startingValue = "_|_"
+						state.periodStates = map[int64]*PeriodState{}
+						state.periodStates[state.period] = initPeriodState(state.period)
+						state.periodStates[state.period].startingValue = "_|_"
 					}
 					
 					log.Printf("NewChain: %v", PrettyPrint(bcs.blockchain))

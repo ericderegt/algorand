@@ -6,12 +6,13 @@ import (
 	// "github.com/nyu-distributed-systems-fa18/algorand/pb"
 )
 
-func runStep2(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes int64) string {
+func runStep2(periodStates map[int64]*PeriodState, requiredVotes int64, currentPeriod int64) string {
+  lastPeriod := currentPeriod - 1
   var voteValue string
   votes := int64(0)
 
-  if currentPeriod.period > 1 {
-    for value, numVotes := range lastPeriod.nextVotes {
+  if currentPeriod > 1 {
+    for value, numVotes := range periodStates[lastPeriod].nextVotes {
       // find max value
       if numVotes > votes {
         voteValue = value
@@ -22,10 +23,10 @@ func runStep2(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
 
   log.Printf("voteValue: %v, votes: %v", voteValue, votes)
 
-  if currentPeriod.period == 1 || (voteValue == "_|_" && votes >= requiredVotes) {
+  if currentPeriod == 1 || (voteValue == "_|_" && votes >= requiredVotes) {
     log.Printf("Period is 1 or vote value is _|_")
-    log.Printf("ProposedValues: %#v", currentPeriod.proposedValues)
-    leadersValue := selectLeader(currentPeriod.proposedValues)
+    log.Printf("ProposedValues: %#v", periodStates[currentPeriod].proposedValues)
+    leadersValue := selectLeader(periodStates[currentPeriod].proposedValues)
     log.Printf("leadersValue: %v", leadersValue)
     return leadersValue
   } else if (voteValue != "_|_" && votes >= requiredVotes) {
@@ -34,11 +35,11 @@ func runStep2(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
   return ""
 }
 
-func runStep3(currentPeriod *PeriodState, requiredVotes int64) string {
+func runStep3(periodStates map[int64]*PeriodState, requiredVotes int64, currentPeriod int64) string {
   var voteValue string
   votes := int64(0)
 
-  for value, numVotes := range currentPeriod.softVotes {
+  for value, numVotes := range periodStates[currentPeriod].softVotes {
     // find max value
     if numVotes > votes {
       voteValue = value
@@ -54,12 +55,13 @@ func runStep3(currentPeriod *PeriodState, requiredVotes int64) string {
   return ""
 }
 
-func runStep4(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes int64) string {
+func runStep4(periodStates map[int64]*PeriodState, requiredVotes int64, currentPeriod int64) string {
+  lastPeriod := currentPeriod - 1
   var voteValue string
   votes := int64(0)
 
-  if currentPeriod.period > 1 {
-    for value, numVotes := range lastPeriod.nextVotes {
+  if currentPeriod > 1 {
+    for value, numVotes := range periodStates[lastPeriod].nextVotes {
       // find max value
       if numVotes > votes {
         voteValue = value
@@ -68,23 +70,25 @@ func runStep4(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
     }
   }
 
-  if currentPeriod.myCertVote != "" {
-    voteValue = currentPeriod.myCertVote
-  } else if currentPeriod.period >= 2 && voteValue == "_|_" && votes >= requiredVotes {
+  if periodStates[currentPeriod].myCertVote != "" {
+    voteValue = periodStates[currentPeriod].myCertVote
+  } else if currentPeriod >= 2 && voteValue == "_|_" && votes >= requiredVotes {
     voteValue = "_|_"
   } else {
     // next vote starting value stpi??
-    voteValue = currentPeriod.startingValue
+    voteValue = periodStates[currentPeriod].startingValue
   }
   return voteValue
 }
 
-func runStep5(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes int64) string {
+func runStep5(periodStates map[int64]*PeriodState, requiredVotes int64, currentPeriod int64) string {
+  lastPeriod := currentPeriod - 1
+
   // if i sees 2t + 1 soft-votes for some value v != ⊥ for period p, then i next-votes v.
   var voteValue string
   votes := int64(0)
 
-  for value, numVotes := range currentPeriod.softVotes {
+  for value, numVotes := range periodStates[currentPeriod].softVotes {
     // find max value
     if numVotes > votes {
       voteValue = value
@@ -97,18 +101,18 @@ func runStep5(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
   } 
 
   // If p ≥ 2 AND i sees 2t+ 1 next-votes for ⊥ for period p−1 AND i has not certified in period p , then i next-votes _|_
-  if currentPeriod.period > 1 {
+  if currentPeriod > 1 {
     voteValue = ""
     votes = int64(0)
 
-    for value, numVotes := range lastPeriod.nextVotes {
+    for value, numVotes := range periodStates[lastPeriod].nextVotes {
       if numVotes > votes {
         voteValue = value
         votes = numVotes
       }
     }
 
-    if voteValue == "_|_" && votes >= requiredVotes && currentPeriod.myCertVote == "" {
+    if voteValue == "_|_" && votes >= requiredVotes && periodStates[currentPeriod].myCertVote == "" {
       return "_|_"
     }
   }
@@ -117,20 +121,24 @@ func runStep5(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
 }
 
 // Returns value if consensus has chosen a block, otherwise empty string
-func checkHaltingCondition(currentPeriod *PeriodState, requiredVotes int64) string {
-  var voteValue string
-  votes := int64(0)
+func checkHaltingCondition(periodStates map[int64]*PeriodState, requiredVotes int64) string {
 
-  for value, numVotes := range currentPeriod.certVotes {
-    // find max value
-    if numVotes > votes {
-      voteValue = value
-      votes = numVotes
+  // check for required cert votes in any period
+  for currentPeriod,_ := range periodStates {
+    var voteValue string
+    votes := int64(0)
+
+    for value, numVotes := range periodStates[currentPeriod].certVotes {
+      // find max value
+      if numVotes > votes {
+        voteValue = value
+        votes = numVotes
+      }
     }
-  }
 
-  if (votes >= requiredVotes) {
-    return voteValue
+    if (votes >= requiredVotes) {
+      return voteValue
+    }
   }
   return ""
 }
