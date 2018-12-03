@@ -321,8 +321,11 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		case <-roundTimer.C:
 			// propose block if last round complete or very first round
 			if state.readyForNextRound {
-				log.Printf("Starting round %v", state.round)
+				log.Printf("Starting round %v, period %v", state.round, state.period)
 				state.readyForNextRound = false
+
+				// we don't want step two to happen too quick before users can collect proposedBlocks
+				restartTimer(agreementTimer, 10000)
 
 				// we capture our tempBlock at the time agreement starts. We will reconcile this block after agreement ends
 				state.proposedBlock = prepareBlock(state.tempBlock, bcs.blockchain)
@@ -456,6 +459,9 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					state.lastPeriodState = state.periodState
 					state.periodState = initPeriodState(state.period)
 					state.periodState.startingValue = calculateHash(state.proposedBlock)
+					
+					// allow step1 to happen again
+					state.readyForNextRound = true
 				}
 			}
 
@@ -550,6 +556,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 						requestBlockChainResponseChan <- RequestBlockChainResponse{ret: ret, err: err, peer: p}
 					}(c, p)
 				}
+				pbc.response <- pb.ProposeBlockRet{Success: false}
 				break
 			}
 			
@@ -570,21 +577,44 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			} else {
 				// rejected proposed block
 				log.Printf("DENIED that %v is on the committee for round %v", proposerId, state.round)
-				pbc.response <- pb.ProposeBlockRet{Success: false}
+				pbc.response <- pb.ProposeBlockRet{Success: true}
 			}
 
 		case pbr := <-proposeBlockResponseChan:
-			log.Printf("ProposeBlockResponse from: %v", pbr.peer)
+			if pbr.err != nil || !pbr.ret.Success{
+				// retry
+				p := pbr.peer
+				c := peerClients[p]
+
+				// calculate your signature for this round and period
+				sigParams := []string{strconv.FormatInt(state.round, 10), strconv.FormatInt(state.period, 10)}
+				sig := SIG(userId, sigParams)
+
+				// get your proposal back out of the map
+				proposerCredential := []string{userId, sig.SignedMessage}
+				proposerHash := signMessage(proposerCredential)
+
+				// check if you proposed a block for this round and period
+				if v, ok := state.periodState.proposedValues[proposerHash]; ok {
+					b := state.periodState.valueToBlock[v]
+
+					go func(c pb.AlgorandClient, p string, b *pb.Block, v string, sig *pb.SIGRet, round int64) {
+						ret, err := c.ProposeBlock(context.Background(), &pb.ProposeBlockArgs{Block: b, Credential: sig, Value: v, Round: round, Peer: userId})
+						proposeBlockResponseChan <- ProposeBlockResponse{ret: ret, err: err, peer: p}
+					}(c, p, b, v, sig, state.round)
+				}
+			}
 
 		case vc := <-algorand.VoteChan:
 			if vc.arg.Round > state.round {
 				log.Printf("Round is behind peers, request blockchains")
 				for p, c := range peerClients {
 					go func(c pb.AlgorandClient, p string) {
-						ret, err := c.RequestBlockChain(context.Background(), &pb.RequestBlockChainArgs{Peer: p})
+						ret, err := c.RequestBlockChain(context.Background(), &pb.RequestBlockChainArgs{Peer: userId})
 						requestBlockChainResponseChan <- RequestBlockChainResponse{ret: ret, err: err, peer: p}
 					}(c, p)
 				}
+				vc.response <- pb.VoteRet{Success: false}
 				break
 			}
 
@@ -655,16 +685,33 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			bcc.response <- pb.RequestBlockChainRet{Peer: userId, Blockchain: bcs.blockchain}
 
 		case bcr := <-requestBlockChainResponseChan:
-			candidateBlockchain := bcr.ret.Blockchain
+			log.Printf("Received Blockchain from %v", bcr.peer)
 
-			if len(candidateBlockchain) > len(bcs.blockchain) {
-				// verify every block in this blockchain
-				verified := false
+			if bcr.err == nil {
+				candidateBlockchain := bcr.ret.Blockchain
 
+				if len(candidateBlockchain) > len(bcs.blockchain) {
+					log.Printf("CandidateChain: %v", PrettyPrint(candidateBlockchain))
 
-				if verified {
-					log.Printf("Verified new Blockchain from peer: %v", bcr.ret.Peer)
-					bcs.blockchain = candidateBlockchain
+					// verify every block in this blockchain
+					verified := true
+
+					if verified {
+						log.Printf("Verified new Blockchain from peer: %v", bcr.ret.Peer)
+						bcs.blockchain = candidateBlockchain
+
+						// Prepare to reenter into Agreement
+						state.readyForNextRound = true
+						state.round = int64(len(bcs.blockchain))
+
+						state.lastPeriodState = PeriodState{}
+						state.period = int64(1)
+						state.step = int64(1)
+						state.periodState = initPeriodState(state.period)
+						state.periodState.startingValue = "_|_"
+					}
+					
+					log.Printf("NewChain: %v", PrettyPrint(bcs.blockchain))
 				}
 			}
 		}

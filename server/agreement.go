@@ -70,7 +70,7 @@ func runStep4(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
 
   if currentPeriod.myCertVote != "" {
     voteValue = currentPeriod.myCertVote
-  } else if currentPeriod.period >= 2 && voteValue == "_|_" && votes > requiredVotes {
+  } else if currentPeriod.period >= 2 && voteValue == "_|_" && votes >= requiredVotes {
     voteValue = "_|_"
   } else {
     // next vote starting value stpi??
@@ -80,7 +80,7 @@ func runStep4(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
 }
 
 func runStep5(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes int64) string {
-  // if i sees 2t + 1 soft-votes for some value v 6= ⊥ for period p, then i next-votes v.
+  // if i sees 2t + 1 soft-votes for some value v != ⊥ for period p, then i next-votes v.
   var voteValue string
   votes := int64(0)
 
@@ -92,7 +92,7 @@ func runStep5(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
     }
   }
 
-  if voteValue != "_|_" && votes > requiredVotes {
+  if voteValue != "_|_" && votes >= requiredVotes {
     return voteValue
   } 
 
@@ -108,7 +108,7 @@ func runStep5(currentPeriod *PeriodState, lastPeriod *PeriodState, requiredVotes
       }
     }
 
-    if voteValue == "_|_" && votes > requiredVotes && currentPeriod.myCertVote == "" {
+    if voteValue == "_|_" && votes >= requiredVotes && currentPeriod.myCertVote == "" {
       return "_|_"
     }
   }
