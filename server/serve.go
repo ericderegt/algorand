@@ -34,9 +34,15 @@ type ServerState struct {
 type PeriodState struct {
 	proposedValues	map[string]string
 	valueToBlock	map[string]*pb.Block
+
 	nextVotes		map[string]int64
 	softVotes		map[string]int64
 	certVotes		map[string]int64
+
+	haveNextVoted	map[string]bool
+	haveSoftVoted	map[string]bool
+	haveCertVoted	map[string]bool
+
 	myCertVote  	string
 	startingValue	string
 	period			int64
@@ -147,9 +153,15 @@ func initPeriodState(p int64) PeriodState {
 	newPeriodState := PeriodState{
 		proposedValues: make(map[string]string),
 		valueToBlock:   make(map[string]*pb.Block),
+
 		nextVotes: 		make(map[string]int64),
 		softVotes: 		make(map[string]int64),
 		certVotes: 		make(map[string]int64),
+
+		haveNextVoted:	make(map[string]bool),
+		haveSoftVoted:	make(map[string]bool),
+		haveCertVoted:	make(map[string]bool),
+
 		myCertVote: 	"",
 		startingValue: 	"",
 		period: 		p,
@@ -530,38 +542,60 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			log.Printf("ProposeBlockResponse from: %v", pbr.peer)
 
 		case vc := <-algorand.VoteChan:
+			voterId := vc.arg.Message.UserId
 			voteValue := vc.arg.Message.Message[0]
 			voteType := vc.arg.Message.Message[1]
 			votePeriod, _ := strconv.ParseInt(vc.arg.Message.Message[2], 10, 64)
-			log.Printf("Received %vVote from: %v", voteType, vc.arg.Message.UserId)
+			log.Printf("Received %vVote from: %v", voteType, voterId)
 
 			if voteType == "soft" {
-				if votePeriod == state.periodState.period {
-					state.periodState.softVotes[voteValue]++
-				} else if votePeriod == state.lastPeriodState.period {
-					state.lastPeriodState.softVotes[voteValue]++
+				_, hasVoted := state.periodState.haveSoftVoted[voterId]
+				if !hasVoted {
+					if votePeriod == state.periodState.period {
+						state.periodState.softVotes[voteValue]++
+					} else if votePeriod == state.lastPeriodState.period {
+						state.lastPeriodState.softVotes[voteValue]++
+					}
+					state.periodState.haveSoftVoted[voterId] = true
+					vc.response <- pb.VoteRet{Success: true}
+				} else {
+					log.Printf("Ignoring %vVote from %v: already %vVoted this period", voteType, voterId, voteType)
+					vc.response <- pb.VoteRet{Success: false}
 				}
-				vc.response <- pb.VoteRet{Success: true}
 			} else if voteType == "cert" {
-				if votePeriod == state.periodState.period {
-					state.periodState.certVotes[voteValue]++
-				} else if votePeriod == state.lastPeriodState.period {
-					state.lastPeriodState.certVotes[voteValue]++
-				}
-				vc.response <- pb.VoteRet{Success: true}
+				_, hasVoted := state.periodState.haveCertVoted[voterId]
+				if !hasVoted {
+					if votePeriod == state.periodState.period {
+						state.periodState.certVotes[voteValue]++
+					} else if votePeriod == state.lastPeriodState.period {
+						state.lastPeriodState.certVotes[voteValue]++
+					}
+					state.periodState.haveCertVoted[voterId] = true
+					vc.response <- pb.VoteRet{Success: true}
 
-				// we need to check for halting condition anytime we see a new cert vote
-				haltValue := checkHaltingCondition(&state.periodState, requiredVotes)
-				if haltValue != "" {
-					handleHalt(bcs, &state, state.periodState.valueToBlock[haltValue])
+					// we need to check for halting condition anytime we see a new cert vote
+					haltValue := checkHaltingCondition(&state.periodState, requiredVotes)
+					if haltValue != "" {
+						handleHalt(bcs, &state, state.periodState.valueToBlock[haltValue])
+					}
+				} else {
+					log.Printf("Ignoring %vVote from %v: already %vVoted this period", voteType, voterId, voteType)
+					vc.response <- pb.VoteRet{Success: false}
 				}
 			} else if voteType == "next" {
-				if votePeriod == state.periodState.period {
-					state.periodState.nextVotes[voteValue]++
-				} else if votePeriod == state.lastPeriodState.period {
-					state.lastPeriodState.nextVotes[voteValue]++
+				_, hasVoted := state.periodState.haveNextVoted[voterId]
+				if !hasVoted {
+					if votePeriod == state.periodState.period {
+						state.periodState.nextVotes[voteValue]++
+					} else if votePeriod == state.lastPeriodState.period {
+						state.lastPeriodState.nextVotes[voteValue]++
+					}
+					state.periodState.haveNextVoted[voterId] = true
+					vc.response <- pb.VoteRet{Success: true}
+				} else {
+					log.Printf("Ignoring %vVote from %v: already %vVoted this period", voteType, voterId, voteType)
+					vc.response <- pb.VoteRet{Success: false}
 				}
-				vc.response <- pb.VoteRet{Success: true}
 			} else {
 				log.Printf("Strange to arrive here")
 				vc.response <- pb.VoteRet{Success: false}
