@@ -163,12 +163,18 @@ func sortition(privateKey int64, round int64, role string, userId string, candid
 	return "hash", "proof", votes
 }
 
-func verifySort(userId string, candidates []string, round int64, k int64) bool {
+func verifySort(userId string, candidates []string, round int64, k int64, period int64) bool {
+	sigParams := []string{strconv.FormatInt(round, 10), strconv.FormatInt(period, 10)}
+
+	proposerCredential := SIG(userId, sigParams)
+
 	committee := committeeSelection(candidates, round, k)
 
 	// loop through committee and verify userId is in there
 	for _, member := range committee {
-		if member == userId {
+		memberCredential := SIG(member, sigParams)
+
+		if memberCredential.SignedMessage == proposerCredential.SignedMessage {
 			return true
 		}
 	}

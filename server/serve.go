@@ -309,7 +309,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				// each server needs exact same seed per round so they all see the same selection
 				_, _, votes := sortition(state.privateKey, state.round, "proposer", userId, candidates, k)
 
-				sigParams := []string{state.seed, strconv.FormatInt(state.period, 10)}
+				sigParams := []string{strconv.FormatInt(state.round, 10), strconv.FormatInt(state.period, 10)}
 
 				sig := SIG(userId, sigParams)
 
@@ -522,7 +522,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			proposerId := pbc.arg.Credential.UserId
 			log.Printf("ProposeBlock from %v", proposerId)
 
-			verified := verifySort(proposerId, candidates, state.round, k)
+			verified := verifySort(proposerId, candidates, state.round, k, state.period)
 			if verified {
 				log.Printf("VERIFIED that %v is on the committee for round %v", proposerId, state.round)
 
@@ -535,6 +535,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				pbc.response <- pb.ProposeBlockRet{Success: true}
 			} else {
 				// rejected proposed block
+				log.Printf("DENIED that %v is on the committee for round %v", proposerId, state.round)
 				pbc.response <- pb.ProposeBlockRet{Success: false}
 			}
 
