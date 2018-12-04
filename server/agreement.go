@@ -84,6 +84,8 @@ func runStep4(periodStates map[int64]*PeriodState, requiredVotes int64, currentP
 func runStep5(periodStates map[int64]*PeriodState, requiredVotes int64, currentPeriod int64) string {
   lastPeriod := currentPeriod - 1
 
+  log.Printf("SoftVotes: %#v", periodStates[currentPeriod].softVotes)
+
   // if i sees 2t + 1 soft-votes for some value v != ⊥ for period p, then i next-votes v.
   var voteValue string
   votes := int64(0)

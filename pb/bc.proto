@@ -69,10 +69,6 @@ message VoteArgs {
 
 message VoteRet {
     bool success = 1;
-    string type = 2;
-    int64 round = 3;
-    int64 period = 4;
-    string peer = 5;
 }
 
 message SIGRet {
