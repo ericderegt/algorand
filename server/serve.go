@@ -32,6 +32,7 @@ type ServerState struct {
 
 type PeriodState struct {
 	proposedValues	map[string]string
+	proposedValuesNaive  map[string]string
 	valueToBlock	map[string]*pb.Block
 
 	nextVotes		map[string]int64
@@ -193,6 +194,7 @@ func restartTimer(timer *time.Timer, ms int64) {
 func initPeriodState(p int64) *PeriodState {
 	newPeriodState := PeriodState{
 		proposedValues: make(map[string]string),
+		proposedValuesNaive: make(map[string]string),
 		valueToBlock:   make(map[string]*pb.Block),
 
 		nextVotes: 		make(map[string]int64),
@@ -409,6 +411,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					proposerCredential := []string{userId, sig.SignedMessage}
 					proposerHash := signMessage(proposerCredential)
 					state.periodStates[state.period].proposedValues[proposerHash] = v
+					state.periodStates[state.period].proposedValuesNaive[userId] = v
 					state.periodStates[state.period].valueToBlock[v] = b
 
 					// broadcast proposal
@@ -467,17 +470,19 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					certVoteSIG := SIG(userId, message)
 
 					for p, c := range peerClients {
-						go func(c pb.AlgorandClient, p string, certVoteSIG *pb.SIGRet, round int64) {
+						go func(c pb.AlgorandClient, p string, certVoteSIG *pb.SIGRet, round int64, period int64) {
 							log.Printf("Sent cert vote to peer %v", p)
-							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: certVoteSIG, Round: round, Period: state.period, Peer: userId})
+							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: certVoteSIG, Round: round, Period: period, Peer: userId})
 							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
-						}(c, p, certVoteSIG, state.round)
+						}(c, p, certVoteSIG, state.round, state.period)
 					}
 
 					// check if our own vote helped us reach requiredVotes
 					haltValue := checkHaltingCondition(state.periodStates, requiredVotes)
 					if haltValue != "" {
 						handleHalt(bcs, &state, state.periodStates[state.period].valueToBlock[haltValue])
+						restartTimer(agreementTimer, 10000)
+						restartTimer(roundTimer, 5000)
 					}
 				}
 			} else if state.step == 4 {
@@ -493,11 +498,11 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				nextVoteSIG := SIG(userId, message)
 
 				for p, c := range peerClients {
-					go func(c pb.AlgorandClient, p string, nextVoteSIG *pb.SIGRet, round int64) {
+					go func(c pb.AlgorandClient, p string, nextVoteSIG *pb.SIGRet, round int64, period int64) {
 						log.Printf("Sent next vote to peer %v", p)
-						ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: nextVoteSIG, Round: round, Period: state.period, Peer: userId})
+						ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: nextVoteSIG, Round: round, Period: period, Peer: userId})
 						voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
-					}(c, p, nextVoteSIG, state.round)
+					}(c, p, nextVoteSIG, state.round, state.period)
 				}
 			} else if state.step == 5 {
 				log.Printf("PERIOD %v, STEP 5", state.period)
@@ -513,11 +518,11 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					nextVoteSIG := SIG(userId, message)
 
 					for p, c := range peerClients {
-						go func(c pb.AlgorandClient, p string, nextVoteSIG *pb.SIGRet, round int64) {
+						go func(c pb.AlgorandClient, p string, nextVoteSIG *pb.SIGRet, round int64, period int64) {
 							log.Printf("Sent next vote to peer %v", p)
-							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: nextVoteSIG, Round: round, Period: state.period, Peer: userId})
+							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: nextVoteSIG, Round: round, Period: period, Peer: userId})
 							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
-						}(c, p, nextVoteSIG, state.round)
+						}(c, p, nextVoteSIG, state.round, state.period)
 					}
 
 					// finish period
@@ -527,6 +532,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					
 					// allow step1 to happen again
 					state.readyForNextRound = true
+					restartTimer(agreementTimer, 10000)
+						restartTimer(roundTimer, 5000)
 				}
 			}
 
@@ -574,21 +581,10 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			log.Printf("AppendTransactionResponse: %#v", atr)
 
 		case pbc := <-algorand.ProposeBlockChan:
-			if pbc.arg.Round > state.round {
-				for p, c := range peerClients {
-					go func(c pb.AlgorandClient, p string) {
-						ret, err := c.RequestBlockChain(context.Background(), &pb.RequestBlockChainArgs{Peer: p})
-						requestBlockChainResponseChan <- RequestBlockChainResponse{ret: ret, err: err, peer: p}
-					}(c, p)
-				}
-				pbc.response <- pb.ProposeBlockRet{Success: false}
-				break
-			}
-			
 			proposerId := pbc.arg.Credential.UserId
-			log.Printf("ProposeBlock from %v", proposerId)
-
 			proposerPeriod := pbc.arg.Period
+
+			log.Printf("ProposeBlock from %v", proposerId)
 
 			// TODO: use arg.Period
 			verified := verifySort(proposerId, candidates, state.round, k, proposerPeriod)
@@ -600,6 +596,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 				proposerHash := signMessage(proposerCredential)
 				// add verified block to list of blocks I've seen this period
 				state.periodStates[proposerPeriod].proposedValues[proposerHash] = pbc.arg.Value
+				state.periodStates[proposerPeriod].proposedValuesNaive[proposerId] = pbc.arg.Value
 				state.periodStates[proposerPeriod].valueToBlock[pbc.arg.Value] = pbc.arg.Block
 				pbc.response <- pb.ProposeBlockRet{Success: true}
 			} else {
@@ -616,7 +613,10 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			voterId := vc.arg.Message.UserId
 			voteValue := vc.arg.Message.Message[0]
 			voteType := vc.arg.Message.Message[1]
-			votePeriod, _ := strconv.ParseInt(vc.arg.Message.Message[2], 10, 64)
+			// votePeriod, _ := strconv.ParseInt(vc.arg.Message.Message[2], 10, 64)
+			votePeriod := vc.arg.Period
+
+			log.Printf("Vote from %v with value: %#v", voterId, vc.arg.Message.Message)
 
 			if voteType == "soft" {
 				_, hasVoted := state.periodStates[votePeriod].haveSoftVoted[voterId]
@@ -642,6 +642,8 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 					haltValue := checkHaltingCondition(state.periodStates, requiredVotes)
 					if haltValue != "" {
 						handleHalt(bcs, &state, state.periodStates[state.period].valueToBlock[haltValue])
+						restartTimer(agreementTimer, 10000)
+						restartTimer(roundTimer, 5000)
 					}
 				} else {
 					vc.response <- pb.VoteRet{Success: true}
@@ -694,6 +696,7 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 
 						// reset AgreementTimer to very long time to allow us to receive votes and proposeblocks
 						restartTimer(agreementTimer, 10000)
+						restartTimer(roundTimer, 5000)
 
 						// Now we need to request proposeBlocks we have missed and votes
 						for p, c := range peerClients {
@@ -717,36 +720,43 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 			log.Printf("Request Votes from: %v", rvc.arg.Peer)
 
 			// loop through all our votes and send them out
-			for p,c := range peerClients {
-				for period,_ := range state.periodStates {
-					// Send nextVote if needed
-					nextVoteV := state.periodStates[period].myNextVote
-					if nextVoteV != "" {
-						message := []string{nextVoteV, "next", strconv.FormatInt(period, 10)}
-						nextVoteSIG := SIG(userId, message)
+			for period,_ := range state.periodStates {
+				// Send nextVote if needed
+				nextVoteV := state.periodStates[period].myNextVote
+				if nextVoteV != "" {
+					message := []string{nextVoteV, "next", strconv.FormatInt(period, 10)}
+					nextVoteSIG := SIG(userId, message)
 
+					for p,c := range peerClients {
+						log.Printf("Sending late NextVote in period %v to %v", period, p)
 						go func(c pb.AlgorandClient, p string, nextVoteSIG *pb.SIGRet, round int64, period int64) {
 							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: nextVoteSIG, Round: round, Period: period, Peer: userId})
 							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
 						}(c, p, nextVoteSIG, state.round, period)
 					}
-					// Send softVote if needed
-					softVoteV := state.periodStates[period].mySoftVote
-					if softVoteV != "" {
-						message := []string{softVoteV, "soft", strconv.FormatInt(period, 10)}
-						softVoteSIG := SIG(userId, message)
+				}
+				// Send softVote if needed
+				softVoteV := state.periodStates[period].mySoftVote
+				if softVoteV != "" {
+					message := []string{softVoteV, "soft", strconv.FormatInt(period, 10)}
+					softVoteSIG := SIG(userId, message)
 
+					for p,c := range peerClients {
+						log.Printf("Sending late SoftVote in period %v to %v", period, p)
 						go func(c pb.AlgorandClient, p string, softVoteSIG *pb.SIGRet, round int64, period int64) {
 							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: softVoteSIG, Round: round, Period: period, Peer: userId})
 							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
 						}(c, p, softVoteSIG, state.round, period)
 					}
-					// Send certVote if needed
-					certVoteV := state.periodStates[period].myCertVote
-					if certVoteV != "" {
-						message := []string{certVoteV, "soft", strconv.FormatInt(period, 10)}
-						certVoteSIG := SIG(userId, message)
+				}
+				// Send certVote if needed
+				certVoteV := state.periodStates[period].myCertVote
+				if certVoteV != "" {
+					message := []string{certVoteV, "cert", strconv.FormatInt(period, 10)}
+					certVoteSIG := SIG(userId, message)
 
+					for p,c := range peerClients {
+						log.Printf("Sending late CertVote in period %v to %v", period, p)
 						go func(c pb.AlgorandClient, p string, certVoteSIG *pb.SIGRet, round int64, period int64) {
 							ret, err := c.Vote(context.Background(), &pb.VoteArgs{Message: certVoteSIG, Round: round, Period: period, Peer: userId})
 							voteResponseChan <- VoteResponse{ret: ret, err: err, peer: p}
@@ -762,20 +772,22 @@ func serve(bcs *BCStore, peers *arrayPeers, id string, port int) {
 		case rpbc := <-algorand.RequestProposeBlockChan:
 			log.Printf("Request ProposeBlock from: %v", rpbc.arg.Peer)
 
-			for p,c := range peerClients {
-				for period,_ := range state.periodStates {
-					// calculate your signature for this round and period
-					sigParams := []string{strconv.FormatInt(state.round, 10), strconv.FormatInt(period, 10)}
-					sig := SIG(userId, sigParams)
+			for period,_ := range state.periodStates {
+				// calculate your signature for this round and period
+				sigParams := []string{strconv.FormatInt(state.round, 10), strconv.FormatInt(period, 10)}
+				sig := SIG(userId, sigParams)
 
-					// get your proposal back out of the map
-					proposerCredential := []string{userId, sig.SignedMessage}
-					proposerHash := signMessage(proposerCredential)
+				// // get your proposal back out of the map
+				// proposerCredential := []string{userId, sig.SignedMessage}
+				// proposerHash := signMessage(proposerCredential)
 
-					// check if you proposed a block for this round and period
-					if v, ok := state.periodStates[period].proposedValues[proposerHash]; ok {
-						b := state.periodStates[period].valueToBlock[v]
+				// check if you proposed a block for this round and period
+				// if v, ok := state.periodStates[period].proposedValues[proposerHash]; ok {
+				if v, ok := state.periodStates[period].proposedValuesNaive[userId]; ok {
+					b := state.periodStates[period].valueToBlock[v]
 
+					for p,c := range peerClients {
+						log.Printf("Sending Late Propose Block to %v", p)
 						go func(c pb.AlgorandClient, p string, b *pb.Block, v string, sig *pb.SIGRet, round int64, period int64) {
 							ret, err := c.ProposeBlock(context.Background(), &pb.ProposeBlockArgs{Block: b, Credential: sig, Value: v, Round: round, Period: period,Peer: userId})
 							proposeBlockResponseChan <- ProposeBlockResponse{ret: ret, err: err, peer: p}

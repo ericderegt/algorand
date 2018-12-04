@@ -25,8 +25,8 @@ func runStep2(periodStates map[int64]*PeriodState, requiredVotes int64, currentP
 
   if currentPeriod == 1 || (voteValue == "_|_" && votes >= requiredVotes) {
     log.Printf("Period is 1 or vote value is _|_")
-    log.Printf("ProposedValues: %#v", periodStates[currentPeriod].proposedValues)
-    leadersValue := selectLeader(periodStates[currentPeriod].proposedValues)
+    log.Printf("ProposedValues: %#v", periodStates[currentPeriod].proposedValuesNaive)
+    leadersValue := selectLeader(periodStates[currentPeriod].proposedValuesNaive)
     log.Printf("leadersValue: %v", leadersValue)
     return leadersValue
   } else if (voteValue != "_|_" && votes >= requiredVotes) {
