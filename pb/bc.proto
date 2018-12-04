@@ -53,7 +53,8 @@ message ProposeBlockArgs {
     Block block = 2;
     string value = 3;
     int64 round = 4;
-    string peer = 5;
+    int64 period = 5;
+    string peer = 6;
 }
 
 message ProposeBlockRet {
@@ -86,6 +87,22 @@ message RequestBlockChainRet {
     repeated Block blockchain = 2; 
 }
 
+message RequestVotesArgs {
+    string peer = 1;
+}
+
+message RequestVotesRet {
+    bool success = 1;
+}
+
+message RequestProposeBlockArgs {
+    string peer = 1;
+}
+
+message RequestProposeBlockRet {
+    bool success = 1;
+}
+
 // Algorand service
 service Algorand {
     rpc AppendBlock(AppendBlockArgs) returns (AppendBlockRet) {}
@@ -93,6 +110,8 @@ service Algorand {
     rpc ProposeBlock(ProposeBlockArgs) returns (ProposeBlockRet) {}
     rpc Vote(VoteArgs) returns (VoteRet) {}
     rpc RequestBlockChain(RequestBlockChainArgs) returns (RequestBlockChainRet) {}
+    rpc RequestVotes(RequestVotesArgs) returns (RequestVotesRet) {}
+    rpc RequestProposeBlock(RequestProposeBlockArgs) returns (RequestProposeBlockRet) {}
 }
 
 message Blockchain {
